@@ -173,7 +173,7 @@ function renderTickets() {
   );
 
   if (list.length === 0) {
-    ticketBody.innerHTML = `<tr><td colspan="7" class="empty">当前筛选下没有工单</td></tr>`;
+    ticketBody.innerHTML = `<tr><td colspan="8" class="empty">当前筛选下没有工单</td></tr>`;
   } else {
     ticketBody.innerHTML = list.map(ticketRow).join("");
   }
@@ -195,6 +195,7 @@ function ticketRow(t) {
       <td class="code">${t.id}</td>
       <td>${t.trackingId}</td>
       <td>${t.type}</td>
+      <td class="note">${t.note || '<span class="empty">—</span>'}</td>
       <td><span class="badge ${meta.badge}">${meta.label}</span></td>
       <td>${t.assignee || '<span class="empty">未分派</span>'}</td>
       <td><span class="badge ${sla.badge}">${sla.text}</span></td>
@@ -234,7 +235,11 @@ function assignTicket(id) {
     return;
   }
 
-  ticket.assignee = "王运营";
+  // 让客服自己选处理人；点"取消"就什么都不做
+  const name = prompt("把这个工单指派给谁？", "王运营");
+  if (name === null) return;                   // 用户点了取消
+  ticket.assignee = name.trim() || "王运营";    // 输入为空时回退到默认值
+
   ticket.status = "processing";
   renderTickets();
 }

@@ -232,3 +232,18 @@ label textarea:focus {
   box-shadow: 0 0 0 3px rgba(181, 67, 47, 0.12);
 }
 .actions { display: flex; gap: 10px; margin-top: 4px; }
+
+/* 客户描述列：限制宽度，太长就省略 */
+.table td.note {
+  max-width: 200px;
+  color: #57606a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 8 列后需要更宽的容器，并禁止单元格内换行 */
+main { max-width: 1100px; }
+.table th,
+.table td { white-space: nowrap; }
+.table td.note { max-width: 220px; }
