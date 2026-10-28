@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>快递异常件处理系统</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">📦 异常件处理系统</div>
+    <nav class="tabs">
+      <button class="tab active" data-view="customer">客户查件</button>
+      <button class="tab" data-view="service">客服工单</button>
+      <button class="tab" data-view="ops">运营处理</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 客户视角 -->
+    <section id="view-customer" class="view active">
+      <h1>查我的包裹</h1>
+      <form id="query-form" class="search">
+        <input id="tracking-input" placeholder="输入运单号，例如 SF1001" />
+        <button type="submit">查询</button>
+      </form>
+      <p class="hint">可以试试：SF1001（延误）、SF1002（破损）、SF1003（正常）</p>
+      <div id="result"></div>
+    </section>
+
+    <!-- 客服 / 运营：下一版实现 -->
+    <section id="view-service" class="view">
+      <h1>工单列表</h1>
+      <p class="empty">下一版（M2）实现：工单列表、分派、处理时限。</p>
+    </section>
+
+    <section id="view-ops" class="view">
+      <h1>待处理工单</h1>
+      <p class="empty">下一版（M3）实现：受理、核实记录、提交处理结果。</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
