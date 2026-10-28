@@ -28,12 +28,69 @@
       <div id="result"></div>
     </section>
 
-    <!-- 客服 / 运营：下一版实现 -->
+    <!-- 客服视角 -->
     <section id="view-service" class="view">
-      <h1>工单列表</h1>
-      <p class="empty">下一版（M2）实现：工单列表、分派、处理时限。</p>
+      <div class="page-head">
+        <h1>工单列表</h1>
+        <button id="create-ticket-btn" class="btn primary">+ 新建工单</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><span id="stat-pending">0</span><label>待分派</label></div>
+        <div class="stat"><span id="stat-processing">0</span><label>处理中</label></div>
+        <div class="stat danger"><span id="stat-overdue">0</span><label>已超时</label></div>
+      </div>
+
+      <div class="filters" id="ticket-filters">
+        <button class="chip active" data-status="all">全部</button>
+        <button class="chip" data-status="pending">待分派</button>
+        <button class="chip" data-status="processing">处理中</button>
+        <button class="chip" data-status="resolved">待确认</button>
+        <button class="chip" data-status="closed">已关闭</button>
+      </div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>工单号</th>
+            <th>运单号</th>
+            <th>异常类型</th>
+            <th>状态</th>
+            <th>处理人</th>
+            <th>剩余时限</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="ticket-body"></tbody>
+      </table>
+
+      <div id="create-form" class="card hidden">
+        <h2>新建工单</h2>
+        <form id="ticket-form">
+          <label>运单号
+            <input id="f-tracking" placeholder="例如 SF1001" required />
+          </label>
+          <label>异常类型
+            <select id="f-type">
+              <option>延误</option>
+              <option>物品破损</option>
+              <option>标签破损</option>
+              <option>联系人异常</option>
+              <option>签收争议</option>
+            </select>
+          </label>
+          <label>客户描述
+            <textarea id="f-desc" rows="3" placeholder="客户反馈的内容"></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit" class="btn primary">创建工单</button>
+            <button type="button" id="cancel-create" class="btn">取消</button>
+          </div>
+        </form>
+      </div>
     </section>
 
+    <!-- 运营视角：M3 实现 -->
     <section id="view-ops" class="view">
       <h1>待处理工单</h1>
       <p class="empty">下一版（M3）实现：受理、核实记录、提交处理结果。</p>
