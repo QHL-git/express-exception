@@ -286,3 +286,20 @@ main { max-width: 1100px; }
   font-weight: 600;
   color: #8c959f;
 }
+
+/* ==================== M4：客户侧工单 ==================== */
+.message {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  background: #f6f8fa;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+}
+.message.muted {
+  color: #8c959f;
+  background: #fff;
+  border-style: dashed;
+}
+.card .actions { margin-top: 16px; }

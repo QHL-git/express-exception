@@ -70,7 +70,7 @@ form.addEventListener("submit", (event) => {
     result.innerHTML = `<p class="empty">没有找到运单 ${id}，请检查单号是否正确。</p>`;
     return;
   }
-  result.innerHTML = renderShipment(shipment);
+  renderCustomerResult(id);
 });
 
 function renderShipment(s) {
@@ -106,6 +106,114 @@ function renderShipment(s) {
 }
 
 // ================================================================
+//  客户侧：工单进度与确认（M4）
+// ================================================================
+
+// 同一个状态，客户看到的说法和内部不一样
+const CUSTOMER_STATUS = {
+  pending: { label: "已受理，等待处理", badge: "warn" },
+  processing: { label: "处理中", badge: "info" },
+  resolved: { label: "待您确认", badge: "ok" },
+  closed: { label: "已解决", badge: "muted" },
+};
+
+function fmtTime(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function renderCustomerResult(trackingId) {
+  const shipment = shipments[trackingId];
+  const myTickets = tickets.filter((t) => t.trackingId === trackingId);
+
+  const ticketsHtml = myTickets.length
+    ? `<h2 class="section-title">我的工单</h2>` + myTickets.map(customerTicketCard).join("")
+    : `<p class="empty">这件包裹目前没有异常工单。</p>`;
+
+  result.innerHTML = renderShipment(shipment) + ticketsHtml;
+}
+
+function customerTicketCard(t) {
+  const meta = CUSTOMER_STATUS[t.status] || CUSTOMER_STATUS.pending;
+
+  const message = t.customerVisibleNote
+    ? `<div class="message">${t.customerVisibleNote}</div>`
+    : `<div class="message muted">客服正在核实，有结果后会在这里回复您。</div>`;
+
+  // 只展示标记为"客户可见"的历史，内部记录不会出现在这里
+  const history = t.history
+    .filter((h) => h.visible)
+    .map((h) => `<li>${h.text}<time>${fmtTime(h.time)}</time></li>`)
+    .join("");
+
+  const actions =
+    t.status === "resolved"
+      ? `<div class="actions">
+           <button class="btn primary" data-confirm="${t.id}">确认已解决</button>
+           <button class="btn" data-reject="${t.id}">不认可</button>
+         </div>`
+      : "";
+
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="code">${t.id}</div>
+          <div class="empty">${t.type} · 提交于 ${fmtTime(t.createdAt)}</div>
+        </div>
+        <span class="badge ${meta.badge}">${meta.label}</span>
+      </div>
+      ${message}
+      <ul class="timeline">${history}</ul>
+      ${actions}
+    </div>
+  `;
+}
+
+// 客户确认或拒绝，都要走状态机
+result.addEventListener("click", (event) => {
+  const confirmBtn = event.target.closest("[data-confirm]");
+  if (confirmBtn) {
+    resolveTicket(confirmBtn.dataset.confirm, true);
+    return;
+  }
+
+  const rejectBtn = event.target.closest("[data-reject]");
+  if (rejectBtn) {
+    resolveTicket(rejectBtn.dataset.reject, false);
+  }
+});
+
+function resolveTicket(id, accepted) {
+  const ticket = tickets.find((t) => t.id === id);
+  if (!ticket) return;
+
+  const target = accepted ? "closed" : "processing";
+  if (!canTransition(ticket.status, target)) {
+    console.warn(`非法流转：${ticket.status} → ${target}`);
+    return;
+  }
+
+  if (accepted) {
+    ticket.status = "closed";
+    addHistory(ticket, "客户确认问题已解决，工单关闭", true);
+  } else {
+    ticket.status = "processing";
+    ticket.customerVisibleNote = "";   // 旧说明作废，客服要重新写
+    addHistory(ticket, "客户不认可处理结果，工单退回重新处理", true);
+  }
+
+  saveTickets();
+
+  const currentId = input.value.trim().toUpperCase();
+  if (shipments[currentId]) renderCustomerResult(currentId);
+
+  renderTickets();
+  renderOps();
+}
+
+// ================================================================
 //  工单模块（M2）
 // ================================================================
 
@@ -136,11 +244,69 @@ let tickets = [
   { id: "GD-0001", trackingId: "SF1001", type: "延误", status: "pending", assignee: "", createdAt: hoursAgo(30), note: "包裹三天没有更新", internalNotes: "", result: "", customerVisibleNote: "" },
   { id: "GD-0002", trackingId: "SF1002", type: "物品破损", status: "processing", assignee: "王运营", createdAt: hoursAgo(20), note: "外包装破损，客户拒收", internalNotes: "已联系武汉站点确认外箱破损，正在重新打包", result: "", customerVisibleNote: "" },
   { id: "GD-0003", trackingId: "SF1002", type: "标签破损", status: "processing", assignee: "李运营", createdAt: hoursAgo(2), note: "面单模糊，地址无法辨认", internalNotes: "", result: "", customerVisibleNote: "" },
-  { id: "GD-0004", trackingId: "SF1003", type: "签收争议", status: "resolved", assignee: "王运营", createdAt: hoursAgo(10), note: "显示已签收但客户称未收到", internalNotes: "监控显示快件被同楼住户代收", result: "已上门取回并重新派送", customerVisibleNote: "" },
+  { id: "GD-0004", trackingId: "SF1003", type: "签收争议", status: "resolved", assignee: "王运营", createdAt: hoursAgo(10), note: "显示已签收但客户称未收到", internalNotes: "监控显示快件被同楼住户代收", result: "已上门取回并重新派送", customerVisibleNote: "您反馈的签收问题我们已核实：快件由同楼住户代收，我们已取回并重新安排派送，预计今天送达。" },
   { id: "GD-0005", trackingId: "SF1001", type: "联系人异常", status: "closed", assignee: "李运营", createdAt: hoursAgo(50), note: "收件电话为空号", internalNotes: "三次拨打均提示空号", result: "已按寄件人地址退回", customerVisibleNote: "因收件电话无法接通，包裹已退回寄件人" },
 ];
 
-let ticketSeq = 6;
+// 给每条工单补上历史记录字段（旧数据可能没有）
+// 演示用的客户可见历史，让客户页面一打开就有内容
+const seedHistory = {
+  "GD-0004": [
+    { time: hoursAgo(9), text: "客户提交了异常反馈", visible: true },
+    { time: hoursAgo(3), text: "客服已回复处理说明", visible: true },
+  ],
+  "GD-0005": [
+    { time: hoursAgo(49), text: "客户提交了异常反馈", visible: true },
+    { time: hoursAgo(20), text: "客服已回复处理说明", visible: true },
+    { time: hoursAgo(18), text: "客户确认问题已解决，工单关闭", visible: true },
+  ],
+};
+tickets.forEach((t) => { t.history = seedHistory[t.id] || []; });
+
+// ============ 本地持久化（M4） ============
+// 浏览器 localStorage 只能存字符串，所以 Date 要转成 ISO 字符串再存回来转回 Date
+const STORAGE_KEY = "express-exception:tickets:v1";
+
+function saveTickets() {
+  const plain = tickets.map((t) => ({
+    ...t,
+    createdAt: t.createdAt.toISOString(),
+  }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(plain));
+  } catch (err) {
+    console.warn("保存到本地失败（可能是浏览器限制了本地存储）", err);
+  }
+}
+
+function loadTickets() {
+  let raw;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch (err) {
+    return null;      // 某些环境下不允许访问 localStorage，直接用默认数据
+  }
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw).map((t) => ({ ...t, createdAt: new Date(t.createdAt) }));
+  } catch (err) {
+    console.warn("本地数据损坏，已忽略", err);
+    return null;
+  }
+}
+
+const savedTickets = loadTickets();
+if (savedTickets && savedTickets.length > 0) {
+  tickets = savedTickets;
+}
+
+// 记录一条历史，visible 决定客户能不能看到
+function addHistory(ticket, text, visible) {
+  ticket.history.push({ time: new Date().toISOString(), text, visible });
+}
+
+let ticketSeq =
+  tickets.reduce((max, t) => Math.max(max, Number(t.id.replace("GD-", "")) || 0), 0) + 1;
 let currentFilter = "all";
 
 const ticketBody = document.getElementById("ticket-body");
@@ -255,6 +421,8 @@ function assignTicket(id) {
   ticket.assignee = name.trim() || "王运营";    // 输入为空时回退到默认值
 
   ticket.status = "processing";
+  addHistory(ticket, `客服已创建工单并分派给 ${ticket.assignee}`, false);
+  saveTickets();
   renderTickets();
 }
 
@@ -267,6 +435,8 @@ function writeCustomerNote(id) {
   const text = prompt("写给客户看的说明（内部记录不会出现在这里）：", hint);
   if (text === null) return;              // 取消
   ticket.customerVisibleNote = text.trim();
+  addHistory(ticket, "客服已回复处理说明", true);
+  saveTickets();
 
   renderTickets();
   renderOps();
@@ -312,7 +482,9 @@ document.getElementById("ticket-form").addEventListener("submit", (event) => {
     internalNotes: "",
     result: "",
     customerVisibleNote: "",
+    history: [{ time: new Date().toISOString(), text: "客户提交了异常反馈", visible: true }],
   });
+  saveTickets();
 
   event.target.reset();
   createForm.classList.add("hidden");
@@ -430,6 +602,8 @@ document.getElementById("ops-form").addEventListener("submit", (event) => {
   t.internalNotes = document.getElementById("ops-notes").value.trim();
   t.result = document.getElementById("ops-result").value.trim();
   t.status = "resolved";          // 处理中 → 待客户确认
+  addHistory(t, `运营已提交处理结果：${t.result || "（未填写）"}`, false);
+  saveTickets();
 
   closeOpsPanel();
   renderOps();
