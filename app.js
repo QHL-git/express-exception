@@ -48,6 +48,10 @@ document.querySelectorAll(".tab").forEach((btn) => {
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("view-" + btn.dataset.view).classList.add("active");
+
+    // 切换视图时重新渲染，避免看到旧数据
+    if (btn.dataset.view === "service") renderTickets();
+    if (btn.dataset.view === "ops") renderOps();
   });
 });
 
@@ -129,11 +133,11 @@ const NEAR_DUE_HOURS = 4;    // 剩余不足 4 小时算"即将超时"
 const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000);
 
 let tickets = [
-  { id: "GD-0001", trackingId: "SF1001", type: "延误", status: "pending", assignee: "", createdAt: hoursAgo(30), note: "包裹三天没有更新" },
-  { id: "GD-0002", trackingId: "SF1002", type: "物品破损", status: "processing", assignee: "王运营", createdAt: hoursAgo(20), note: "外包装破损，客户拒收" },
-  { id: "GD-0003", trackingId: "SF1002", type: "标签破损", status: "processing", assignee: "李运营", createdAt: hoursAgo(2), note: "面单模糊，地址无法辨认" },
-  { id: "GD-0004", trackingId: "SF1003", type: "签收争议", status: "resolved", assignee: "王运营", createdAt: hoursAgo(10), note: "显示已签收但客户称未收到" },
-  { id: "GD-0005", trackingId: "SF1001", type: "联系人异常", status: "closed", assignee: "李运营", createdAt: hoursAgo(50), note: "收件电话为空号" },
+  { id: "GD-0001", trackingId: "SF1001", type: "延误", status: "pending", assignee: "", createdAt: hoursAgo(30), note: "包裹三天没有更新", internalNotes: "", result: "", customerVisibleNote: "" },
+  { id: "GD-0002", trackingId: "SF1002", type: "物品破损", status: "processing", assignee: "王运营", createdAt: hoursAgo(20), note: "外包装破损，客户拒收", internalNotes: "已联系武汉站点确认外箱破损，正在重新打包", result: "", customerVisibleNote: "" },
+  { id: "GD-0003", trackingId: "SF1002", type: "标签破损", status: "processing", assignee: "李运营", createdAt: hoursAgo(2), note: "面单模糊，地址无法辨认", internalNotes: "", result: "", customerVisibleNote: "" },
+  { id: "GD-0004", trackingId: "SF1003", type: "签收争议", status: "resolved", assignee: "王运营", createdAt: hoursAgo(10), note: "显示已签收但客户称未收到", internalNotes: "监控显示快件被同楼住户代收", result: "已上门取回并重新派送", customerVisibleNote: "" },
+  { id: "GD-0005", trackingId: "SF1001", type: "联系人异常", status: "closed", assignee: "李运营", createdAt: hoursAgo(50), note: "收件电话为空号", internalNotes: "三次拨打均提示空号", result: "已按寄件人地址退回", customerVisibleNote: "因收件电话无法接通，包裹已退回寄件人" },
 ];
 
 let ticketSeq = 6;
@@ -185,10 +189,13 @@ function ticketRow(t) {
   const meta = STATUS_META[t.status];
   const sla = slaOf(t);
 
-  const action =
-    t.status === "pending"
-      ? `<button class="btn small" data-assign="${t.id}">指派</button>`
-      : `<span class="empty">—</span>`;
+  let action = `<span class="empty">—</span>`;
+  if (t.status === "pending") {
+    action = `<button class="btn small" data-assign="${t.id}">指派</button>`;
+  } else if (t.status === "resolved") {
+    const label = t.customerVisibleNote ? "修改对外说明" : "生成对外说明";
+    action = `<button class="btn small" data-explain="${t.id}">${label}</button>`;
+  }
 
   return `
     <tr>
@@ -218,11 +225,18 @@ function updateStats() {
   document.getElementById("stat-overdue").textContent = overdue;
 }
 
-// ---------- 交互：指派 ----------
+// ---------- 交互：指派 / 对外说明 ----------
 ticketBody.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-assign]");
-  if (!btn) return;
-  assignTicket(btn.dataset.assign);
+  const assignBtn = event.target.closest("[data-assign]");
+  if (assignBtn) {
+    assignTicket(assignBtn.dataset.assign);
+    return;
+  }
+
+  const explainBtn = event.target.closest("[data-explain]");
+  if (explainBtn) {
+    writeCustomerNote(explainBtn.dataset.explain);
+  }
 });
 
 function assignTicket(id) {
@@ -242,6 +256,20 @@ function assignTicket(id) {
 
   ticket.status = "processing";
   renderTickets();
+}
+
+// 客服把运营的内部结论整理成"客户能看懂"的说明
+function writeCustomerNote(id) {
+  const ticket = tickets.find((t) => t.id === id);
+  if (!ticket) return;
+
+  const hint = ticket.customerVisibleNote || "我们已核实您反馈的情况，正在处理，稍后会同步结果。";
+  const text = prompt("写给客户看的说明（内部记录不会出现在这里）：", hint);
+  if (text === null) return;              // 取消
+  ticket.customerVisibleNote = text.trim();
+
+  renderTickets();
+  renderOps();
 }
 
 // ---------- 交互：筛选 ----------
@@ -281,6 +309,9 @@ document.getElementById("ticket-form").addEventListener("submit", (event) => {
     assignee: "",
     createdAt: new Date(),
     note: document.getElementById("f-desc").value.trim(),
+    internalNotes: "",
+    result: "",
+    customerVisibleNote: "",
   });
 
   event.target.reset();
@@ -292,8 +323,132 @@ document.getElementById("ticket-form").addEventListener("submit", (event) => {
   renderTickets();
 });
 
+// ================================================================
+//  运营处理模块（M3）
+// ================================================================
+
+let currentOpsUser = "王运营";
+let editingTicketId = null;
+
+const opsList = document.getElementById("ops-list");
+const opsPanel = document.getElementById("ops-panel");
+
+// 只渲染"指派给我"的工单：这就是最小权限原则
+function renderOps() {
+  const processing = tickets.filter(
+    (t) => t.assignee === currentOpsUser && t.status === "processing"
+  );
+  const submitted = tickets.filter(
+    (t) => t.assignee === currentOpsUser && t.status === "resolved"
+  );
+
+  let html = "";
+
+  if (processing.length === 0) {
+    html += `<p class="empty">${currentOpsUser} 目前没有处理中的工单。</p>`;
+  } else {
+    html += processing.map((t) => opsCard(t, true)).join("");
+  }
+
+  if (submitted.length > 0) {
+    html += `<h2 class="section-title">已提交，等待客服对外说明</h2>`;
+    html += submitted.map((t) => opsCard(t, false)).join("");
+  }
+
+  opsList.innerHTML = html;
+}
+
+function opsCard(t, actionable) {
+  const sla = slaOf(t);
+  return `
+    <div class="ops-card">
+      <div class="ops-main">
+        <div class="code">${t.id} <span class="empty">· ${t.trackingId} · ${t.type}</span></div>
+        <div class="ops-note">${t.note || "（客户未填写描述）"}</div>
+      </div>
+      <div class="ops-side">
+        <span class="badge ${sla.badge}">${sla.text}</span>
+        ${actionable ? `<button class="btn small primary" data-open="${t.id}">处理</button>` : `<span class="empty">已提交</span>`}
+      </div>
+    </div>
+  `;
+}
+
+// 打开处理面板（先校验身份和状态，再展示表单）
+function openOpsPanel(id) {
+  const t = tickets.find((x) => x.id === id);
+  if (!t) return;
+
+  if (t.assignee !== currentOpsUser) {
+    alert("这张工单没有指派给你，你不能处理。");
+    return;
+  }
+  if (!canTransition(t.status, "resolved")) {
+    alert("当前状态不允许提交处理结果。");
+    return;
+  }
+
+  editingTicketId = id;
+  document.getElementById("ops-title").textContent = `${t.id} · ${t.trackingId}`;
+  document.getElementById("ops-subtitle").textContent = `${t.type} · ${t.note || "无描述"}`;
+  document.getElementById("ops-notes").value = t.internalNotes || "";
+  document.getElementById("ops-result").value = t.result || "";
+
+  opsPanel.classList.remove("hidden");
+  opsPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function closeOpsPanel() {
+  editingTicketId = null;
+  opsPanel.classList.add("hidden");
+}
+
+opsList.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-open]");
+  if (!btn) return;
+  openOpsPanel(btn.dataset.open);
+});
+
+document.getElementById("ops-cancel").addEventListener("click", closeOpsPanel);
+
+// 提交处理结果：状态机 + 身份 双重校验
+document.getElementById("ops-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const t = tickets.find((x) => x.id === editingTicketId);
+  if (!t) return;
+
+  if (t.assignee !== currentOpsUser) {
+    alert("只有被分派的人可以提交处理结果。");
+    return;
+  }
+  if (!canTransition(t.status, "resolved")) {
+    alert("当前状态不允许提交处理结果。");
+    return;
+  }
+
+  t.internalNotes = document.getElementById("ops-notes").value.trim();
+  t.result = document.getElementById("ops-result").value.trim();
+  t.status = "resolved";          // 处理中 → 待客户确认
+
+  closeOpsPanel();
+  renderOps();
+  renderTickets();
+});
+
+// 切换身份：重新渲染，列表跟着变
+document.getElementById("ops-user").addEventListener("change", (event) => {
+  currentOpsUser = event.target.value;
+  closeOpsPanel();
+  renderOps();
+});
+
 // ---------- 初始化 ----------
 renderTickets();
+renderOps();
 
 // 每分钟重算一次时限，让"剩余时间"真的在走
-setInterval(renderTickets, 60 * 1000);
+setInterval(() => {
+  renderTickets();
+  renderOps();
+}, 60 * 1000);

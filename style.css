@@ -247,3 +247,42 @@ main { max-width: 1100px; }
 .table th,
 .table td { white-space: nowrap; }
 .table td.note { max-width: 220px; }
+
+/* ==================== M3：运营处理 ==================== */
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: #57606a;
+}
+.inline select {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+
+.ops-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #e6e8eb;
+  border-radius: 12px;
+}
+.ops-main { min-width: 0; }
+.ops-note { margin-top: 4px; font-size: 13px; color: #8c959f; }
+.ops-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.section-title {
+  margin: 28px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #8c959f;
+}
