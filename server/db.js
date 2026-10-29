@@ -4,7 +4,8 @@ const { DatabaseSync } = require("node:sqlite");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const dataDir = path.join(__dirname, "..", "data");
+// 数据目录可通过 DATA_DIR 指定（部署到云平台时通常挂载持久磁盘到这个目录）
+const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new DatabaseSync(path.join(dataDir, "app.db"));

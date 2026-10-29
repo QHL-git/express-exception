@@ -16,6 +16,7 @@
 - [数据模型](#数据模型)
 - [关键设计](#关键设计)
 - [测试](#测试)
+- [部署](#部署)
 - [已知限制](#已知限制)
 
 ## 功能
@@ -341,6 +342,65 @@ node test-api.js
 
 通过 11，失败 0
 ```
+
+## 部署
+
+### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|---|---|---|
+| `PORT` | 监听端口（云平台通常自动注入） | `3000` |
+| `JWT_SECRET` | 令牌签名密钥，**生产必须改** | 内置开发值 |
+| `DATA_DIR` | 数据库文件目录，指向持久磁盘 | `../data` |
+
+生成一个随机密钥：
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### 方案 A：Render（免费，最快拿到公网链接）
+
+1. 注册 <https://render.com>，用 GitHub 账号登录
+2. **New +** → **Web Service** → 选择 `express-exception` 仓库
+3. 填写：
+   - **Root Directory**：`server`
+   - **Build Command**：`npm install`
+   - **Start Command**：`npm start`
+4. 在 **Environment Variables** 添加 `JWT_SECRET`（上一步生成的随机串）
+5. 点 **Create Web Service**，等待构建完成，得到一个 `https://xxx.onrender.com` 地址
+
+⚠️ 免费实例的两个限制：
+
+- 15 分钟无访问会休眠，下次访问需冷启动约 30 秒
+- **磁盘是临时的**，重新部署或重启后 `data/app.db` 会重置为种子数据
+
+只做演示够用；要长期保存数据，选方案 B 或给 Render 挂付费磁盘并设置 `DATA_DIR`。
+
+### 方案 B：有持久磁盘的服务器（推荐长期）
+
+学生机（阿里云 / 腾讯云）或 Zeabur / Railway / Fly.io 都可以。核心三点：
+
+1. 装 Node ≥ 22.5
+2. 拉代码、`cd server && npm install`
+3. 用 `JWT_SECRET=... DATA_DIR=/var/data PORT=3000 npm start` 启动，并用 `systemd` 或 `pm2` 守护进程
+
+### 方案 C：Docker
+
+```bash
+docker build -t express-exception .
+docker run -d -p 3000:3000 \
+  -e JWT_SECRET=<你的密钥> \
+  -v $(pwd)/data:/app/data \
+  express-exception
+```
+
+### 部署后自检
+
+1. 打开首页能进入登录页（说明静态资源正常）
+2. 用 `agent` / `123456` 能登录（说明数据库已初始化）
+3. 新建一个工单，**重启服务**后刷新，数据还在（说明持久化生效）
+4. 直接访问 `/api/tickets`（不带令牌）应返回 401
 
 ## 已知限制
 
