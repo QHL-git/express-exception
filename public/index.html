@@ -7,152 +7,174 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">📦 异常件处理系统</div>
-    <nav class="tabs">
-      <button class="tab active" data-view="customer">客户查件</button>
-      <button class="tab" data-view="service">客服工单</button>
-      <button class="tab" data-view="ops">运营处理</button>
-    </nav>
-  </header>
-
-  <main>
-    <!-- 客户视角 -->
-    <section id="view-customer" class="view active">
-      <h1>查我的包裹</h1>
-      <form id="query-form" class="search">
-        <input id="tracking-input" placeholder="输入运单号，例如 SF1001" />
-        <button type="submit">查询</button>
-      </form>
-      <p class="hint">可以试试：SF1001（延误）、SF1002（破损）、SF1003（正常）</p>
-      <div id="result"></div>
-
-      <div id="feedback-panel" class="card hidden">
-        <h2>反馈异常 · <span id="fb-tracking"></span></h2>
-        <form id="feedback-form">
-          <label>异常类型
-            <select id="fb-type">
-              <option>延误</option>
-              <option>物品破损</option>
-              <option>标签破损</option>
-              <option>联系人异常</option>
-              <option>签收争议</option>
-            </select>
-          </label>
-          <label>问题描述
-            <textarea id="fb-desc" rows="3" maxlength="200" placeholder="说说这个包裹出了什么问题（最多 200 字）"></textarea>
-          </label>
-          <div class="actions">
-            <button type="submit" id="fb-submit" class="btn primary">提交反馈</button>
-            <button type="button" id="fb-cancel" class="btn">取消</button>
-          </div>
-        </form>
-      </div>
-    </section>
-
-    <!-- 客服视角 -->
-    <section id="view-service" class="view">
-      <div class="page-head">
-        <h1>工单列表</h1>
-        <button id="create-ticket-btn" class="btn primary">+ 新建工单</button>
-      </div>
-
-      <div class="stats">
-        <div class="stat"><span id="stat-pending">0</span><label>待分派</label></div>
-        <div class="stat"><span id="stat-processing">0</span><label>处理中</label></div>
-        <div class="stat danger"><span id="stat-overdue">0</span><label>已超时</label></div>
-      </div>
-
-      <div class="filters" id="ticket-filters">
-        <button class="chip active" data-status="all">全部</button>
-        <button class="chip" data-status="pending">待分派</button>
-        <button class="chip" data-status="processing">处理中</button>
-        <button class="chip" data-status="resolved">待确认</button>
-        <button class="chip" data-status="closed">已关闭</button>
-      </div>
-
-      <table class="table">
-        <thead>
-          <tr>
-            <th>工单号</th>
-            <th>运单号</th>
-            <th>异常类型</th>
-            <th>客户描述</th>
-            <th>状态</th>
-            <th>处理人</th>
-            <th>剩余时限</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="ticket-body"></tbody>
-      </table>
-
-      <div id="create-form" class="card hidden">
-        <h2>新建工单</h2>
-        <form id="ticket-form">
-          <label>运单号
-            <input id="f-tracking" placeholder="例如 SF1001" required />
-          </label>
-          <label>异常类型
-            <select id="f-type">
-              <option>延误</option>
-              <option>物品破损</option>
-              <option>标签破损</option>
-              <option>联系人异常</option>
-              <option>签收争议</option>
-            </select>
-          </label>
-          <label>客户描述
-            <textarea id="f-desc" rows="3" placeholder="客户反馈的内容"></textarea>
-          </label>
-          <div class="actions">
-            <button type="submit" class="btn primary">创建工单</button>
-            <button type="button" id="cancel-create" class="btn">取消</button>
-          </div>
-        </form>
-      </div>
-    </section>
-
-    <!-- 运营视角 -->
-    <section id="view-ops" class="view">
-      <div class="page-head">
-        <h1>待处理工单</h1>
-        <label class="inline">当前身份
-          <select id="ops-user">
-            <option>王运营</option>
-            <option>李运营</option>
-            <option>张运营</option>
-          </select>
+  <!-- 登录页 -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="brand">📦 异常件处理系统</div>
+      <h1>登录</h1>
+      <form id="login-form">
+        <label>账号
+          <input id="login-username" autocomplete="username" placeholder="用户名" />
         </label>
+        <label>密码
+          <input id="login-password" type="password" autocomplete="current-password" placeholder="密码" />
+        </label>
+        <button type="submit" id="login-submit" class="btn primary">登录</button>
+        <p id="login-error" class="login-error"></p>
+      </form>
+      <div class="login-hint">
+        演示账号（密码都是 <code>123456</code>）<br />
+        客户 <code>customer</code> ｜ 客服 <code>agent</code> ｜ 运营 <code>wang</code> / <code>li</code>
       </div>
+    </div>
+  </div>
 
-      <p class="hint">只显示指派给「当前身份」的工单。换一个人看看，列表会跟着变——这就是权限隔离。</p>
+  <!-- 主应用 -->
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <div class="brand">📦 异常件处理系统</div>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-view="customer" data-role="customer">客户查件</button>
+        <button class="tab" data-view="service" data-role="agent">客服工单</button>
+        <button class="tab" data-view="ops" data-role="ops">运营处理</button>
+      </nav>
+      <div class="user-box">
+        <span id="user-name"></span>
+        <button id="logout-btn" class="btn small">退出</button>
+      </div>
+    </header>
 
-      <div id="ops-list"></div>
+    <main>
+      <!-- 客户视角 -->
+      <section id="view-customer" class="view active">
+        <h1>查我的包裹</h1>
+        <form id="query-form" class="search">
+          <input id="tracking-input" placeholder="输入运单号，例如 SF1001" />
+          <button type="submit">查询</button>
+        </form>
+        <p class="hint">可以试试：SF1001（延误）、SF1002（破损）、SF1003（正常）</p>
+        <div id="result"></div>
 
-      <div id="ops-panel" class="card hidden">
-        <div class="card-head">
-          <div>
-            <div class="code" id="ops-title">GD-0000</div>
-            <div class="empty" id="ops-subtitle"></div>
-          </div>
+        <div id="feedback-panel" class="card hidden">
+          <h2>反馈异常 · <span id="fb-tracking"></span></h2>
+          <form id="feedback-form">
+            <label>异常类型
+              <select id="fb-type">
+                <option>延误</option>
+                <option>物品破损</option>
+                <option>标签破损</option>
+                <option>联系人异常</option>
+                <option>签收争议</option>
+              </select>
+            </label>
+            <label>问题描述
+              <textarea id="fb-desc" rows="3" maxlength="200" placeholder="说说这个包裹出了什么问题（最多 200 字）"></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" id="fb-submit" class="btn primary">提交反馈</button>
+              <button type="button" id="fb-cancel" class="btn">取消</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- 客服视角 -->
+      <section id="view-service" class="view">
+        <div class="page-head">
+          <h1>工单列表</h1>
+          <button id="create-ticket-btn" class="btn primary">+ 新建工单</button>
         </div>
 
-        <form id="ops-form">
-          <label>核实过程（内部记录，客户看不到）
-            <textarea id="ops-notes" rows="3" placeholder="例如：已联系武汉转运中心，确认包裹滞留在分拣环节"></textarea>
-          </label>
-          <label>处理结果（内部，提交后由客服整理成对外说明）
-            <textarea id="ops-result" rows="3" placeholder="例如：已重新安排派送，预计次日送达"></textarea>
-          </label>
-          <div class="actions">
-            <button type="submit" class="btn primary">提交处理结果</button>
-            <button type="button" id="ops-cancel" class="btn">取消</button>
+        <div class="stats">
+          <div class="stat"><span id="stat-pending">0</span><label>待分派</label></div>
+          <div class="stat"><span id="stat-processing">0</span><label>处理中</label></div>
+          <div class="stat danger"><span id="stat-overdue">0</span><label>已超时</label></div>
+        </div>
+
+        <div class="filters" id="ticket-filters">
+          <button class="chip active" data-status="all">全部</button>
+          <button class="chip" data-status="pending">待分派</button>
+          <button class="chip" data-status="processing">处理中</button>
+          <button class="chip" data-status="resolved">待确认</button>
+          <button class="chip" data-status="closed">已关闭</button>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th>工单号</th>
+              <th>运单号</th>
+              <th>异常类型</th>
+              <th>客户描述</th>
+              <th>状态</th>
+              <th>处理人</th>
+              <th>剩余时限</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="ticket-body"></tbody>
+        </table>
+
+        <div id="create-form" class="card hidden">
+          <h2>新建工单</h2>
+          <form id="ticket-form">
+            <label>运单号
+              <input id="f-tracking" placeholder="例如 SF1001" required />
+            </label>
+            <label>异常类型
+              <select id="f-type">
+                <option>延误</option>
+                <option>物品破损</option>
+                <option>标签破损</option>
+                <option>联系人异常</option>
+                <option>签收争议</option>
+              </select>
+            </label>
+            <label>客户描述
+              <textarea id="f-desc" rows="3" placeholder="客户反馈的内容"></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" class="btn primary">创建工单</button>
+              <button type="button" id="cancel-create" class="btn">取消</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- 运营视角 -->
+      <section id="view-ops" class="view">
+        <div class="page-head">
+          <h1>待处理工单</h1>
+        </div>
+
+        <p class="hint">只显示指派给你（<span id="ops-user-name"></span>）的工单。</p>
+
+        <div id="ops-list"></div>
+
+        <div id="ops-panel" class="card hidden">
+          <div class="card-head">
+            <div>
+              <div class="code" id="ops-title">GD-0000</div>
+              <div class="empty" id="ops-subtitle"></div>
+            </div>
           </div>
-        </form>
-      </div>
-    </section>
-  </main>
+
+          <form id="ops-form">
+            <label>核实过程（内部记录，客户看不到）
+              <textarea id="ops-notes" rows="3" placeholder="例如：已联系武汉转运中心，确认包裹滞留在分拣环节"></textarea>
+            </label>
+            <label>处理结果（内部，提交后由客服整理成对外说明）
+              <textarea id="ops-result" rows="3" placeholder="例如：已重新安排派送，预计次日送达"></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" class="btn primary">提交处理结果</button>
+              <button type="button" id="ops-cancel" class="btn">取消</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <script src="app.js"></script>
 </body>

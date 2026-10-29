@@ -303,3 +303,60 @@ main { max-width: 1100px; }
   border-style: dashed;
 }
 .card .actions { margin-top: 16px; }
+
+/* ==================== 登录页（JWT） ==================== */
+.login-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f6f8;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 32px;
+  background: #fff;
+  border: 1px solid #e6e8eb;
+  border-radius: 16px;
+}
+.login-card .brand { margin-bottom: 6px; }
+.login-card h1 { margin: 0 0 24px; font-size: 22px; }
+.login-card .btn { width: 100%; }
+
+.login-error {
+  min-height: 20px;
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #b5432f;
+}
+
+.login-hint {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #e6e8eb;
+  font-size: 12px;
+  line-height: 1.9;
+  color: #8c959f;
+}
+.login-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f0f1f3;
+  font-size: 12px;
+}
+
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #57606a;
+}
+
+/* 修正：.login-screen 的 display:flex 定义在 .hidden 之后，会覆盖它 */
+.login-screen.hidden { display: none; }

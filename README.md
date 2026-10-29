@@ -4,7 +4,7 @@
 
 不是"展示全国物流轨迹"的系统，而是**处理那一件没有正常到达的包裹**——延误、破损、标签破损、联系人异常、签收争议。
 
-![客服工单列表](docs/screenshots/service.png)
+![客服工单列表](docs/screenshots/agent.png)
 
 ## 目录
 
@@ -19,6 +19,18 @@
 - [已知限制](#已知限制)
 
 ## 功能
+
+### 账号与角色
+
+登录后按角色进入不同界面，权限由服务端 JWT 令牌决定：
+
+| 角色 | 账号 | 密码 | 能看到 |
+|---|---|---|---|
+| 客户 | `customer` | `123456` | 自己的工单 |
+| 客服 | `agent` | `123456` | 全部工单 |
+| 运营 | `wang` / `li` | `123456` | 指派给自己的工单 |
+
+![登录页](docs/screenshots/login.png)
 
 ### 客户视角
 
@@ -50,6 +62,7 @@
 |---|---|---|
 | 前端 | 原生 HTML / CSS / JavaScript | 无框架、无构建步骤，直接由后端托管 |
 | 后端 | Node.js 24 + Express 5 | REST 风格接口 |
+| 鉴权 | JWT（`jsonwebtoken`）+ `scrypt` 密码哈希 | 无状态令牌，角色权限在服务端校验 |
 | 数据库 | SQLite（`node:sqlite` 内置模块） | 零安装、单文件，适合课程项目与小型部署 |
 
 > 需要 Node.js **≥ 22.5**（`node:sqlite` 从该版本开始提供），推荐使用 Node 24。
@@ -64,10 +77,11 @@ express-exception/
 │   └── app.js
 ├── server/                  # 后端
 │   ├── index.js             # 路由、校验、启动
+│   ├── auth.js              # 密码哈希 + JWT 签发/校验
 │   ├── db.js                # 数据库连接与建表
-│   ├── seed.js              # 首次启动写入演示数据
+│   ├── seed.js              # 首次启动写入演示数据与账号
 │   ├── shipments.js         # 运单数据（模拟）
-│   ├── test-api.js          # 接口边界测试脚本
+│   ├── test-api.js          # 接口边界与权限测试脚本
 │   └── package.json
 ├── data/app.db              # SQLite 数据库（运行时生成，已 gitignore）
 └── docs/screenshots/        # README 截图
@@ -94,31 +108,49 @@ API 已启动：http://localhost:3000
 
 演示运单号：`SF1001`（延误）、`SF1002`（破损）、`SF1003`（正常）。
 
+演示账号见上方[账号与角色](#账号与角色)，密码统一 `123456`。
+
 `npm run dev` 使用 `node --watch`，修改服务端代码会自动重启。
 
-**重置数据**：停止服务，删除 `data/` 目录，重新启动即可重新写入演示数据。
+**重置数据**：停止服务，删除 `data/` 目录，重新启动即可重新写入演示数据（含账号）。
 
 ## 接口文档
 
 基础地址：`http://localhost:3000`
 
+除登录与健康检查外，所有接口都需要携带令牌：
+
+```http
+Authorization: Bearer <token>
+```
+
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
-| GET | `/api/health` | 健康检查 | — |
-| GET | `/api/shipments/:id` | 查询运单 | 客户 |
-| GET | `/api/tickets` | 工单列表，支持 `?status=` `?assignee=` `?trackingId=` | 客服 / 运营 |
-| GET | `/api/tickets/:id` | 单个工单详情 | — |
-| POST | `/api/tickets` | 创建工单 | 客户 |
+| GET | `/api/health` | 健康检查 | 公开 |
+| POST | `/api/auth/login` | 登录，返回 `{ token, user }` | 公开 |
+| GET | `/api/auth/me` | 用令牌换取当前用户信息 | 登录用户 |
+| GET | `/api/shipments/:id` | 查询运单 | 登录用户 |
+| GET | `/api/tickets` | 工单列表，支持 `?status=` `?trackingId=` | 按角色限定范围 |
+| GET | `/api/tickets/:id` | 单个工单详情 | 客服 / 运营 / 该工单的客户 |
+| POST | `/api/tickets` | 创建工单 | 客户 / 客服 |
 | POST | `/api/tickets/:id/assign` | 指派处理人 | 客服 |
 | POST | `/api/tickets/:id/result` | 提交处理结果 | 运营（须为被分派人） |
 | POST | `/api/tickets/:id/explain` | 生成对外说明 | 客服 |
-| POST | `/api/tickets/:id/confirm` | 客户确认解决 | 客户 |
-| POST | `/api/tickets/:id/reject` | 客户不认可，退回重办 | 客户 |
+| POST | `/api/tickets/:id/confirm` | 客户确认解决 | 该工单的客户 |
+| POST | `/api/tickets/:id/reject` | 客户不认可，退回重办 | 该工单的客户 |
 
 ### 请求示例
 
 ```http
+POST /api/auth/login
+Content-Type: application/json
+
+{ "username": "agent", "password": "123456" }
+```
+
+```http
 POST /api/tickets
+Authorization: Bearer <token>
 Content-Type: application/json
 
 {
@@ -130,10 +162,10 @@ Content-Type: application/json
 
 ```http
 POST /api/tickets/GD-0006/result
+Authorization: Bearer <运营的 token>
 Content-Type: application/json
 
 {
-  "operator": "张运营",
   "internalNotes": "已联系武汉站点，确认外箱破损",
   "result": "已重新打包，安排次日派送"
 }
@@ -145,12 +177,23 @@ Content-Type: application/json
 |---|---|
 | 200 / 201 | 成功 / 创建成功 |
 | 400 | 参数错误（缺字段、类型不合法、运单不存在） |
-| 403 | 无权限（不是被分派人却提交结果） |
+| 401 | 未登录或令牌过期 |
+| 403 | 无权限（角色不符，或操作别人的工单） |
 | 404 | 资源不存在 |
 | 409 | 状态冲突（当前状态不允许该操作） |
 | 500 | 服务端异常 |
 
 ## 数据模型
+
+### `users`
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 用户 ID |
+| `username` | 登录名，唯一 |
+| `password_hash` / `password_salt` | scrypt 哈希后的密码，**不存明文** |
+| `role` | `customer` / `agent` / `ops` |
+| `display_name` | 显示名（运营的工单就是按这个名字指派的） |
 
 ### `tickets`
 
@@ -158,6 +201,7 @@ Content-Type: application/json
 |---|---|---|
 | `id` | TEXT | 工单号，如 `GD-0001` |
 | `tracking_id` | TEXT | 运单号 |
+| `customer_id` | TEXT | 提交人，用于限制客户只能看自己的工单 |
 | `type` | TEXT | 异常类型 |
 | `status` | TEXT | `pending` / `processing` / `resolved` / `closed` |
 | `assignee` | TEXT | 处理人，空串表示未分派 |
@@ -243,6 +287,34 @@ const left = deadline - Date.now();
 
 请求期间按钮置灰（`disabled` + 文案"提交中…"），并在 `finally` 中恢复。避免网络慢时用户连点产生重复工单。
 
+### 7. 鉴权：身份只从令牌来
+
+早期版本里，前端通过请求体传 `operator: "王运营"` 声明身份——这等于让客户端自己说"我是谁"，改个 JSON 就能冒充别人。
+
+现在改为：
+
+1. 登录时服务端校验密码（`scrypt` 哈希，`timingSafeEqual` 比较），签发 JWT
+2. 之后每个请求带 `Authorization: Bearer <token>`
+3. 中间件验签，把 `{ id, role, name }` 挂到 `req.user`
+4. 所有业务判断只用 `req.user`，**完全忽略请求体里的身份字段**
+
+JWT 结构是三段 Base64：`header.payload.signature`。**payload 是明文可读的**，所以只放 `sub/role/name`，绝不放密码；安全性来自第三段签名——没有密钥就伪造不出合法签名。
+
+### 8. 角色权限在服务端
+
+```js
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: "没有权限执行该操作" });
+    }
+    next();
+  };
+}
+```
+
+再叠加数据行级限制：客户只能看 `customer_id = 自己` 的工单，运营只能看 `assignee = 自己` 的工单。**"看不到"和"不能改"是两件事，两层都要做。**
+
 ## 测试
 
 服务启动后执行：
@@ -252,28 +324,40 @@ cd server
 node test-api.js
 ```
 
-覆盖四个边界用例：
+覆盖 11 个用例，包括未登录、错误密码、角色越权、状态流转：
 
 ```
-不存在的运单   HTTP 400  {"error":"运单不存在，请核对单号"}
-非法类型       HTTP 400  {"error":"异常类型不合法"}
-描述超长       HTTP 400  {"error":"问题描述不能超过 200 字"}
-正常提交       HTTP 201  {"id":"GD-0006", ...}
+✅ 未登录访问工单列表  期望 401，实际 401
+✅ 错误密码登录        期望 401，实际 401
+✅ 客户登录            期望 200，实际 200
+✅ 客服登录            期望 200，实际 200
+✅ 运营登录            期望 200，实际 200
+✅ 客户可查询自己的工单 期望 200，实际 200
+✅ 客户不能指派工单     期望 403，实际 403
+✅ 客服可以指派         期望 200，实际 200
+✅ 李运营提交别人工单   期望 403，实际 403
+✅ 王运营提交自己的工单 期望 200，实际 200
+✅ 客户确认解决         期望 200，实际 200
+
+通过 11，失败 0
 ```
 
 ## 已知限制
 
 诚实列出，避免过度包装：
 
-1. **没有真正的登录鉴权**。当前"身份"由前端下拉框选择并通过请求体传入，生产环境应改为 JWT / Session，服务端从令牌解析用户，绝不能信任请求体里的身份。
-2. **运单数据是静态模拟**，未接入真实物流接口。
-3. **工单列表无分页、无搜索**，数据量大时会有性能问题。
-4. **SQLite 单机存储**，适合演示与小型部署，无法水平扩展。
-5. **未使用测试框架**，`test-api.js` 是脚本级验证，不是单元测试。
+1. **令牌存在 `localStorage`**，一旦页面存在 XSS 漏洞，令牌可被脚本读取。生产环境应改为 `HttpOnly` Cookie + CSRF 防护。
+2. **令牌 7 天有效且无法主动吊销**，没有刷新令牌机制，用户改密码后旧令牌仍然可用。
+3. **角色是硬编码的三种**，没有权限管理后台，新增角色要改代码。
+4. **运单数据是静态模拟**，未接入真实物流接口。
+5. **工单列表无分页、无搜索**，数据量大时会有性能问题。
+6. **SQLite 单机存储**，适合演示与小型部署，无法水平扩展。
+7. **未使用测试框架**，`test-api.js` 是脚本级验证，不是单元测试。
 
 ## 后续计划
 
-- [ ] JWT 登录与角色权限（客户 / 客服 / 运营）
+- [x] JWT 登录与角色权限（客户 / 客服 / 运营）
+- [ ] 令牌改存 `HttpOnly` Cookie，加入刷新令牌与主动吊销
 - [ ] 工单分页、关键词搜索
 - [ ] 操作审计与导出报表
 - [ ] 单元测试（node:test）与接口集成测试

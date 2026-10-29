@@ -5,15 +5,15 @@ const path = require("node:path");
 const db = require("./db");
 const shipments = require("./shipments");
 const seed = require("./seed");
+const auth = require("./auth");
 
-seed.run();   // 首次启动时写入演示数据
+seed.run();
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-// ==================== 状态机（服务端也要有一份） ====================
-// 前端那份只负责体验，真正防止非法流转的是这里
+// ==================== 状态机 ====================
 const TRANSITIONS = {
   pending: ["processing"],
   processing: ["resolved"],
@@ -25,14 +25,38 @@ function canTransition(from, to) {
   return (TRANSITIONS[from] || []).includes(to);
 }
 
-// 异常类型白名单：后端也要校验，不能只信前端下拉框
 const EXCEPTION_TYPES = ["延误", "物品破损", "标签破损", "联系人异常", "签收争议"];
+
+// ==================== 鉴权 ====================
+// 身份来自 JWT，不再相信请求体里的任何"我是谁"
+function requireAuth(req, res, next) {
+  const header = req.get("authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  const payload = token ? auth.verifyToken(token) : null;
+
+  if (!payload) {
+    return res.status(401).json({ error: "未登录或登录已过期" });
+  }
+
+  req.user = { id: payload.sub, role: payload.role, name: payload.name };
+  next();
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: "没有权限执行该操作" });
+    }
+    next();
+  };
+}
 
 // ==================== 数据库小工具 ====================
 function toTicket(row) {
   return {
     id: row.id,
     trackingId: row.tracking_id,
+    customerId: row.customer_id,
     type: row.type,
     status: row.status,
     assignee: row.assignee,
@@ -68,28 +92,63 @@ function nextTicketId() {
   return "GD-" + String(last + 1).padStart(4, "0");
 }
 
+// ==================== 登录 ====================
+app.post("/api/auth/login", (req, res) => {
+  const username = String(req.body.username || "").trim();
+  const password = String(req.body.password || "");
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "请输入账号和密码" });
+  }
+
+  const row = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+
+  // 账号不存在时也返回同一句错误，避免泄露"哪些账号存在"
+  const ok = row ? auth.verifyPassword(password, row.password_salt, row.password_hash) : false;
+  if (!ok) {
+    return res.status(401).json({ error: "账号或密码错误" });
+  }
+
+  res.json({
+    token: auth.signToken(row),
+    user: { id: row.id, username: row.username, name: row.display_name, role: row.role },
+  });
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
 // ==================== 查询接口 ====================
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-app.get("/api/shipments/:id", (req, res) => {
+app.get("/api/shipments/:id", requireAuth, (req, res) => {
   const shipment = shipments[req.params.id.toUpperCase()];
   if (!shipment) return res.status(404).json({ error: "运单不存在" });
   res.json(shipment);
 });
 
-app.get("/api/tickets", (req, res) => {
+// 工单列表：不同角色看到的数据范围不同
+app.get("/api/tickets", requireAuth, (req, res) => {
   const conditions = [];
   const params = [];
+
+  if (req.user.role === "customer") {
+    // 客户只能看自己提的工单
+    conditions.push("customer_id = ?");
+    params.push(req.user.id);
+  }
+  if (req.user.role === "ops") {
+    // 运营只能看指派给自己的
+    conditions.push("assignee = ?");
+    params.push(req.user.name);
+  }
 
   if (req.query.status) {
     conditions.push("status = ?");
     params.push(String(req.query.status));
-  }
-  if (req.query.assignee) {
-    conditions.push("assignee = ?");
-    params.push(String(req.query.assignee));
   }
   if (req.query.trackingId) {
     conditions.push("tracking_id = ?");
@@ -103,20 +162,24 @@ app.get("/api/tickets", (req, res) => {
   res.json(db.prepare(sql).all(...params).map(toTicket));
 });
 
-app.get("/api/tickets/:id", (req, res) => {
+app.get("/api/tickets/:id", requireAuth, (req, res) => {
   const ticket = findTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: "工单不存在" });
+
+  if (req.user.role === "customer" && ticket.customerId !== req.user.id) {
+    return res.status(403).json({ error: "无权查看该工单" });
+  }
+
   res.json(ticket);
 });
 
 // ==================== 写接口 ====================
 // 建工单（客户提交异常反馈）
-app.post("/api/tickets", (req, res) => {
+app.post("/api/tickets", requireAuth, requireRole("customer", "agent"), (req, res) => {
   const trackingId = String(req.body.trackingId || "").trim().toUpperCase();
   const type = String(req.body.type || "").trim();
   const note = String(req.body.note || "").trim();
 
-  // 服务端校验：前端可以绕过，这里不能
   if (!trackingId) return res.status(400).json({ error: "缺少运单号" });
   if (!shipments[trackingId]) return res.status(400).json({ error: "运单不存在，请核对单号" });
   if (!EXCEPTION_TYPES.includes(type)) return res.status(400).json({ error: "异常类型不合法" });
@@ -124,16 +187,16 @@ app.post("/api/tickets", (req, res) => {
 
   const id = nextTicketId();
   db.prepare(`
-    INSERT INTO tickets (id, tracking_id, type, status, assignee, created_at, note)
-    VALUES (?, ?, ?, 'pending', '', ?, ?)
-  `).run(id, trackingId, type, new Date().toISOString(), note);
+    INSERT INTO tickets (id, tracking_id, customer_id, type, status, assignee, created_at, note)
+    VALUES (?, ?, ?, ?, 'pending', '', ?, ?)
+  `).run(id, trackingId, req.user.role === "customer" ? req.user.id : "", type, new Date().toISOString(), note);
 
   addHistory(id, "客户提交了异常反馈", true);
   res.status(201).json(findTicket(id));
 });
 
-// 指派（客服操作）
-app.post("/api/tickets/:id/assign", (req, res) => {
+// 指派（客服）
+app.post("/api/tickets/:id/assign", requireAuth, requireRole("agent"), (req, res) => {
   const ticket = findTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: "工单不存在" });
 
@@ -151,15 +214,13 @@ app.post("/api/tickets/:id/assign", (req, res) => {
   res.json(findTicket(ticket.id));
 });
 
-// 提交处理结果（运营操作，必须是被分派人）
-app.post("/api/tickets/:id/result", (req, res) => {
+// 提交处理结果（运营，且必须是被分派人）
+app.post("/api/tickets/:id/result", requireAuth, requireRole("ops"), (req, res) => {
   const ticket = findTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: "工单不存在" });
 
-  // 关键：服务端校验身份。前端那层校验可以被绕过，这层不行
-  // 注意：身份放在请求体里，不放请求头——HTTP 头只允许 ASCII，中文会被编码破坏
-  const operator = String(req.body.operator || req.get("x-operator") || "").trim();
-  if (!operator || operator !== ticket.assignee) {
+  // 身份取自 token，客户端无法伪造
+  if (ticket.assignee !== req.user.name) {
     return res.status(403).json({ error: "只有被分派的运营人员可以提交处理结果" });
   }
 
@@ -178,8 +239,8 @@ app.post("/api/tickets/:id/result", (req, res) => {
   res.json(findTicket(ticket.id));
 });
 
-// 生成对外说明（客服操作）
-app.post("/api/tickets/:id/explain", (req, res) => {
+// 生成对外说明（客服）
+app.post("/api/tickets/:id/explain", requireAuth, requireRole("agent"), (req, res) => {
   const ticket = findTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: "工单不存在" });
 
@@ -193,9 +254,10 @@ app.post("/api/tickets/:id/explain", (req, res) => {
 });
 
 // 客户确认解决
-app.post("/api/tickets/:id/confirm", (req, res) => {
+app.post("/api/tickets/:id/confirm", requireAuth, requireRole("customer"), (req, res) => {
   const ticket = findTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: "工单不存在" });
+  if (ticket.customerId !== req.user.id) return res.status(403).json({ error: "无权操作该工单" });
 
   if (!canTransition(ticket.status, "closed")) {
     return res.status(409).json({ error: "当前状态不能关闭" });
@@ -207,10 +269,11 @@ app.post("/api/tickets/:id/confirm", (req, res) => {
   res.json(findTicket(ticket.id));
 });
 
-// 客户不认可：退回处理中，旧说明作废，但内部记录保留
-app.post("/api/tickets/:id/reject", (req, res) => {
+// 客户不认可：退回处理中，旧说明作废，内部记录保留
+app.post("/api/tickets/:id/reject", requireAuth, requireRole("customer"), (req, res) => {
   const ticket = findTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: "工单不存在" });
+  if (ticket.customerId !== req.user.id) return res.status(403).json({ error: "无权操作该工单" });
 
   if (!canTransition(ticket.status, "processing")) {
     return res.status(409).json({ error: "当前状态不能退回" });
@@ -225,7 +288,6 @@ app.post("/api/tickets/:id/reject", (req, res) => {
 
 // 统一错误处理
 app.use((err, req, res, next) => {
-  // 请求体不是合法 JSON：这是客户端的错，返回 400 而不是 500
   if (err.type === "entity.parse.failed") {
     return res.status(400).json({ error: "请求体不是合法的 JSON" });
   }

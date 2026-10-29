@@ -1,8 +1,19 @@
 // 初始演示数据：只在数据库为空时写入一次
 const db = require("./db");
+const { hashPassword } = require("./auth");
 
 const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
 
+// ---------- 演示账号 ----------
+// 密码统一 123456，仅用于本地演示
+const seedUsers = [
+  { id: "u-cust", username: "customer", role: "customer", displayName: "张三" },
+  { id: "u-agent", username: "agent", role: "agent", displayName: "客服小李" },
+  { id: "u-ops1", username: "wang", role: "ops", displayName: "王运营" },
+  { id: "u-ops2", username: "li", role: "ops", displayName: "李运营" },
+];
+
+// ---------- 演示工单 ----------
 const seedTickets = [
   {
     id: "GD-0001", trackingId: "SF1001", type: "延误", status: "pending",
@@ -46,12 +57,28 @@ const seedHistory = {
 };
 
 function run() {
-  const existing = db.prepare("SELECT COUNT(*) AS c FROM tickets").get().c;
-  if (existing > 0) return;
+  // 1. 用户表为空才写入
+  const userCount = db.prepare("SELECT COUNT(*) AS c FROM users").get().c;
+  if (userCount === 0) {
+    const insertUser = db.prepare(`
+      INSERT INTO users (id, username, password_hash, password_salt, role, display_name)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const u of seedUsers) {
+      const { salt, hash } = hashPassword("123456");
+      insertUser.run(u.id, u.username, hash, salt, u.role, u.displayName);
+    }
+    console.log(`已写入 ${seedUsers.length} 个演示账号（密码都是 123456）`);
+  }
+
+  // 2. 工单表为空才写入
+  const ticketCount = db.prepare("SELECT COUNT(*) AS c FROM tickets").get().c;
+  if (ticketCount > 0) return;
 
   const insertTicket = db.prepare(`
-    INSERT INTO tickets (id, tracking_id, type, status, assignee, created_at, note, internal_notes, result, customer_visible_note)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tickets (id, tracking_id, customer_id, type, status, assignee, created_at, note, internal_notes, result, customer_visible_note)
+    VALUES (?, ?, 'u-cust', ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertHistory = db.prepare(`
     INSERT INTO ticket_history (ticket_id, time, text, visible) VALUES (?, ?, ?, ?)

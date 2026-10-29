@@ -12,9 +12,19 @@ const db = new DatabaseSync(path.join(dataDir, "app.db"));
 db.exec(`
   PRAGMA journal_mode = WAL;
 
+  CREATE TABLE IF NOT EXISTS users (
+    id           TEXT PRIMARY KEY,
+    username     TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    role         TEXT NOT NULL,          -- customer / agent / ops
+    display_name TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS tickets (
     id                    TEXT PRIMARY KEY,
     tracking_id           TEXT NOT NULL,
+    customer_id           TEXT NOT NULL DEFAULT '',
     type                  TEXT NOT NULL,
     status                TEXT NOT NULL,
     assignee              TEXT NOT NULL DEFAULT '',

@@ -1,10 +1,14 @@
 // ================================================================
-//  前端：所有数据都来自后端 API（M5）
-//  页面里不再有任何假数据
+//  前端：JWT 登录 + 按角色渲染
 // ================================================================
 
-const SLA_HOURS = 24;        // 处理时限：24 小时
-const NEAR_DUE_HOURS = 4;    // 剩余不足 4 小时算"即将超时"
+const TOKEN_KEY = "express-exception:token";
+const USER_KEY = "express-exception:user";
+
+const SLA_HOURS = 24;
+const NEAR_DUE_HOURS = 4;
+
+const ROLE_LABEL = { customer: "客户", agent: "客服", ops: "运营" };
 
 const STATUS_META = {
   pending: { label: "待分派", badge: "warn" },
@@ -13,7 +17,6 @@ const STATUS_META = {
   closed: { label: "已关闭", badge: "muted" },
 };
 
-// 同一个状态，客户看到的说法不一样
 const CUSTOMER_STATUS = {
   pending: { label: "已受理，等待处理", badge: "warn" },
   processing: { label: "处理中", badge: "info" },
@@ -22,29 +25,43 @@ const CUSTOMER_STATUS = {
 };
 
 // ==================== 全局状态 ====================
-let tickets = [];              // 从后端拿到的工单列表
+let token = localStorage.getItem(TOKEN_KEY) || "";
+let currentUser = null;
+try {
+  currentUser = JSON.parse(localStorage.getItem(USER_KEY) || "null");
+} catch {
+  currentUser = null;
+}
+
+let tickets = [];
 let currentFilter = "all";
-let currentOpsUser = "王运营";
 let editingTicketId = null;
-let lastQueryId = "";          // 记住客户上次查的运单号，操作后自动刷新
+let lastQueryId = "";
 
 // ==================== 请求封装 ====================
-// 统一处理：解析 JSON、非 2xx 抛错（错误信息用后端返回的 error 字段）
 async function request(path, options = {}) {
-  const res = await fetch(path, options);
+  const headers = { ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(path, { ...options, headers });
   const contentType = res.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await res.json() : null;
 
+  // token 失效：清理本地状态，回到登录页
+  if (res.status === 401) {
+    logout();
+    throw new Error((data && data.error) || "登录已过期，请重新登录");
+  }
   if (!res.ok) {
     throw new Error((data && data.error) || `请求失败（${res.status}）`);
   }
   return data;
 }
 
-function postJson(path, body, headers = {}) {
+function postJson(path, body) {
   return request(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {}),
   });
 }
@@ -61,8 +78,7 @@ function slaOf(ticket) {
   if (ticket.status === "closed") return { text: "—", badge: "muted" };
   if (ticket.status === "resolved") return { text: "等待客户确认", badge: "ok" };
 
-  const createdAt = new Date(ticket.createdAt);
-  const deadline = createdAt.getTime() + SLA_HOURS * 3600 * 1000;
+  const deadline = new Date(ticket.createdAt).getTime() + SLA_HOURS * 3600 * 1000;
   const left = deadline - Date.now();
 
   if (left < 0) return { text: `已超时 ${formatDuration(-left)}`, badge: "danger" };
@@ -76,6 +92,89 @@ function fmtTime(value) {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function setBusy(button, text) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = text;
+  return () => {
+    button.disabled = false;
+    button.textContent = original;
+  };
+}
+
+// ==================== 登录 / 退出 ====================
+const loginScreen = document.getElementById("login-screen");
+const appShell = document.getElementById("app");
+
+document.getElementById("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const button = document.getElementById("login-submit");
+  const errorBox = document.getElementById("login-error");
+  errorBox.textContent = "";
+
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+  if (!username || !password) {
+    errorBox.textContent = "请输入账号和密码";
+    return;
+  }
+
+  const restore = setBusy(button, "登录中…");
+  try {
+    const data = await postJson("/api/auth/login", { username, password });
+    token = data.token;
+    currentUser = data.user;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
+    document.getElementById("login-password").value = "";
+    await enterApp();
+  } catch (err) {
+    errorBox.textContent = err.message;
+  } finally {
+    restore();
+  }
+});
+
+document.getElementById("logout-btn").addEventListener("click", () => logout());
+
+function logout() {
+  token = "";
+  currentUser = null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  appShell.classList.add("hidden");
+  loginScreen.classList.remove("hidden");
+}
+
+async function enterApp() {
+  loginScreen.classList.add("hidden");
+  appShell.classList.remove("hidden");
+
+  document.getElementById("user-name").textContent =
+    `${currentUser.name} · ${ROLE_LABEL[currentUser.role]}`;
+  document.getElementById("ops-user-name").textContent = currentUser.name;
+
+  // 只显示当前角色能用的入口
+  document.querySelectorAll("#tabs .tab").forEach((tab) => {
+    tab.classList.toggle("hidden", tab.dataset.role !== currentUser.role);
+  });
+
+  const ownTab = document.querySelector(`#tabs .tab[data-role="${currentUser.role}"]`);
+  if (ownTab) {
+    document.querySelectorAll("#tabs .tab").forEach((t) => t.classList.remove("active"));
+    ownTab.classList.add("active");
+    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+    document.getElementById("view-" + ownTab.dataset.view).classList.add("active");
+  }
+
+  try {
+    await loadTickets();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 // ==================== 数据加载 ====================
 async function loadTickets() {
   tickets = await request("/api/tickets");
@@ -83,7 +182,7 @@ async function loadTickets() {
   renderOps();
 }
 
-// ==================== 视图切换 ====================
+// ==================== 视图切换（单角色只有一个 tab，保留扩展性）====================
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
@@ -147,14 +246,12 @@ function updateStats() {
 
   const overdue = tickets.filter((t) => {
     if (t.status === "closed" || t.status === "resolved") return false;
-    const deadline = new Date(t.createdAt).getTime() + SLA_HOURS * 3600 * 1000;
-    return deadline < Date.now();
+    return new Date(t.createdAt).getTime() + SLA_HOURS * 3600 * 1000 < Date.now();
   }).length;
 
   document.getElementById("stat-overdue").textContent = overdue;
 }
 
-// ---------- 指派 ----------
 ticketBody.addEventListener("click", (event) => {
   const assignBtn = event.target.closest("[data-assign]");
   if (assignBtn) {
@@ -170,10 +267,9 @@ ticketBody.addEventListener("click", (event) => {
 async function assignTicket(id) {
   const name = prompt("把这个工单指派给谁？", "王运营");
   if (name === null) return;
-  const assignee = name.trim() || "王运营";
 
   try {
-    await postJson(`/api/tickets/${id}/assign`, { assignee });
+    await postJson(`/api/tickets/${id}/assign`, { assignee: name.trim() || "王运营" });
     await loadTickets();
   } catch (err) {
     alert(err.message);
@@ -201,7 +297,6 @@ async function writeCustomerNote(id) {
   }
 }
 
-// ---------- 筛选 ----------
 document.getElementById("ticket-filters").addEventListener("click", (event) => {
   const chip = event.target.closest("[data-status]");
   if (!chip) return;
@@ -212,7 +307,6 @@ document.getElementById("ticket-filters").addEventListener("click", (event) => {
   renderTickets();
 });
 
-// ---------- 新建工单 ----------
 const createForm = document.getElementById("create-form");
 
 document.getElementById("create-ticket-btn").addEventListener("click", () => {
@@ -254,17 +348,19 @@ const opsList = document.getElementById("ops-list");
 const opsPanel = document.getElementById("ops-panel");
 
 function renderOps() {
+  if (!currentUser) return;
+
   const processing = tickets.filter(
-    (t) => t.assignee === currentOpsUser && t.status === "processing"
+    (t) => t.assignee === currentUser.name && t.status === "processing"
   );
   const submitted = tickets.filter(
-    (t) => t.assignee === currentOpsUser && t.status === "resolved"
+    (t) => t.assignee === currentUser.name && t.status === "resolved"
   );
 
   let html = "";
 
   if (processing.length === 0) {
-    html += `<p class="empty">${currentOpsUser} 目前没有处理中的工单。</p>`;
+    html += `<p class="empty">${currentUser.name} 目前没有处理中的工单。</p>`;
   } else {
     html += processing.map((t) => opsCard(t, true)).join("");
   }
@@ -297,12 +393,6 @@ function openOpsPanel(id) {
   const t = tickets.find((x) => x.id === id);
   if (!t) return;
 
-  // 前端这层只是体验；真正的拦截在后端
-  if (t.assignee !== currentOpsUser) {
-    alert("这张工单没有指派给你。");
-    return;
-  }
-
   editingTicketId = id;
   document.getElementById("ops-title").textContent = `${t.id} · ${t.trackingId}`;
   document.getElementById("ops-subtitle").textContent = `${t.type} · ${t.note || "无描述"}`;
@@ -332,34 +422,27 @@ document.getElementById("ops-form").addEventListener("submit", async (event) => 
   const t = tickets.find((x) => x.id === editingTicketId);
   if (!t) return;
 
-  const restore = setBusy(event.submitter || document.querySelector("#ops-form button[type=submit]"), "提交中…");
+  const button = event.target.querySelector("button[type=submit]");
+  const restore = setBusy(button, "提交中…");
 
   try {
-    // 身份放在请求体里，后端会校验它是否等于 assignee
     await postJson(`/api/tickets/${t.id}/result`, {
       internalNotes: document.getElementById("ops-notes").value.trim(),
       result: document.getElementById("ops-result").value.trim(),
-      operator: currentOpsUser,
     });
 
     closeOpsPanel();
     await loadTickets();
     if (lastQueryId === t.trackingId) await queryShipment(lastQueryId);
   } catch (err) {
-    alert(err.message);   // 403 时这里会显示后端返回的原文
+    alert(err.message);   // 403 时显示后端返回的原文
   } finally {
     restore();
   }
 });
 
-document.getElementById("ops-user").addEventListener("change", (event) => {
-  currentOpsUser = event.target.value;
-  closeOpsPanel();
-  renderOps();
-});
-
 // ================================================================
-//  客户：查件 + 工单进度
+//  客户：查件 + 工单 + 反馈
 // ================================================================
 const form = document.getElementById("query-form");
 const input = document.getElementById("tracking-input");
@@ -491,22 +574,9 @@ async function resolveTicket(id, accepted) {
   }
 }
 
-// ================================================================
-//  客户：提交异常反馈
-// ================================================================
+// ---------- 提交异常反馈 ----------
 const feedbackPanel = document.getElementById("feedback-panel");
 let feedbackTrackingId = "";
-
-// 请求期间禁用按钮，避免用户连点提交出两条工单
-function setBusy(button, text) {
-  const original = button.textContent;
-  button.disabled = true;
-  button.textContent = text;
-  return () => {
-    button.disabled = false;
-    button.textContent = original;
-  };
-}
 
 function openFeedback(trackingId) {
   feedbackTrackingId = trackingId;
@@ -538,22 +608,33 @@ document.getElementById("feedback-form").addEventListener("submit", async (event
     await loadTickets();
     await queryShipment(feedbackTrackingId);
   } catch (err) {
-    alert(err.message);      // 例如"运单不存在，请核对单号"
+    alert(err.message);
   } finally {
     restore();
   }
 });
 
 // ================================================================
-//  启动
+//  启动：有 token 就静默续登，没有就停在登录页
 // ================================================================
-loadTickets().catch((err) => {
-  ticketBody.innerHTML = `<tr><td colspan="8" class="empty">加载失败：${err.message}</td></tr>`;
-  opsList.innerHTML = `<p class="empty">加载失败：${err.message}</p>`;
-});
+(async function boot() {
+  if (!token) {
+    loginScreen.classList.remove("hidden");
+    return;
+  }
 
-// 每分钟重算一次时限显示（不重新请求数据）
+  try {
+    const me = await request("/api/auth/me");
+    currentUser = me.user;
+    await enterApp();
+  } catch (err) {
+    logout();
+  }
+})();
+
+// 每分钟刷新时限显示（不重新请求）
 setInterval(() => {
+  if (!currentUser) return;
   renderTickets();
   renderOps();
 }, 60 * 1000);
