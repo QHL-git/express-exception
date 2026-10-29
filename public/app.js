@@ -1,231 +1,10 @@
-// ============ 模拟数据（M5 会换成后端接口） ============
-const shipments = {
-  SF1001: {
-    id: "SF1001",
-    status: "运输中",
-    from: "杭州",
-    to: "武汉",
-    updated: "2026-10-26 09:12",
-    exception: "物流信息已连续 3 天未更新（延误）",
-    traces: [
-      { text: "包裹已到达武汉转运中心", time: "10-23 08:20" },
-      { text: "包裹已从杭州发出", time: "10-22 22:05" },
-      { text: "包裹已揽收", time: "10-22 14:30" },
-    ],
-  },
-  SF1002: {
-    id: "SF1002",
-    status: "派送中",
-    from: "广州",
-    to: "武汉",
-    updated: "2026-10-27 16:40",
-    exception: "外包装破损，已退回站点重新打包（物品破损）",
-    traces: [
-      { text: "快件外包装破损，站点重新加固", time: "10-27 16:40" },
-      { text: "派送员派送中", time: "10-27 09:10" },
-      { text: "包裹已到达武汉网点", time: "10-26 21:30" },
-    ],
-  },
-  SF1003: {
-    id: "SF1003",
-    status: "已签收",
-    from: "上海",
-    to: "武汉",
-    updated: "2026-10-25 11:02",
-    exception: null,
-    traces: [
-      { text: "本人签收", time: "10-25 11:02" },
-      { text: "派送员派送中", time: "10-25 08:45" },
-      { text: "包裹已到达武汉网点", time: "10-24 20:10" },
-    ],
-  },
-};
-
-// ============ 视图切换 ============
-document.querySelectorAll(".tab").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("view-" + btn.dataset.view).classList.add("active");
-
-    // 切换视图时重新渲染，避免看到旧数据
-    if (btn.dataset.view === "service") renderTickets();
-    if (btn.dataset.view === "ops") renderOps();
-  });
-});
-
-// ============ 客户查件（M1） ============
-const form = document.getElementById("query-form");
-const input = document.getElementById("tracking-input");
-const result = document.getElementById("result");
-
-form.addEventListener("submit", (event) => {
-  event.preventDefault();          // 阻止表单刷新页面
-  const id = input.value.trim().toUpperCase();
-  if (!id) return;
-
-  const shipment = shipments[id];
-  if (!shipment) {
-    result.innerHTML = `<p class="empty">没有找到运单 ${id}，请检查单号是否正确。</p>`;
-    return;
-  }
-  renderCustomerResult(id);
-});
-
-function renderShipment(s) {
-  const badge = s.exception
-    ? '<span class="badge warn">存在异常</span>'
-    : '<span class="badge ok">运输正常</span>';
-
-  const notice = s.exception
-    ? `<div class="notice">${s.exception}</div>`
-    : "";
-
-  const traces = s.traces
-    .map((t) => `<li>${t.text}<time>${t.time}</time></li>`)
-    .join("");
-
-  return `
-    <div class="card">
-      <div class="card-head">
-        <div>
-          <div class="code">${s.id}</div>
-          <div class="empty">${s.from} → ${s.to}</div>
-        </div>
-        ${badge}
-      </div>
-      <div class="meta">
-        <div>当前状态<b>${s.status}</b></div>
-        <div>最近更新<b>${s.updated}</b></div>
-      </div>
-      ${notice}
-      <ul class="timeline">${traces}</ul>
-    </div>
-  `;
-}
-
 // ================================================================
-//  客户侧：工单进度与确认（M4）
+//  前端：所有数据都来自后端 API（M5）
+//  页面里不再有任何假数据
 // ================================================================
 
-// 同一个状态，客户看到的说法和内部不一样
-const CUSTOMER_STATUS = {
-  pending: { label: "已受理，等待处理", badge: "warn" },
-  processing: { label: "处理中", badge: "info" },
-  resolved: { label: "待您确认", badge: "ok" },
-  closed: { label: "已解决", badge: "muted" },
-};
-
-function fmtTime(value) {
-  const d = value instanceof Date ? value : new Date(value);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function renderCustomerResult(trackingId) {
-  const shipment = shipments[trackingId];
-  const myTickets = tickets.filter((t) => t.trackingId === trackingId);
-
-  const ticketsHtml = myTickets.length
-    ? `<h2 class="section-title">我的工单</h2>` + myTickets.map(customerTicketCard).join("")
-    : `<p class="empty">这件包裹目前没有异常工单。</p>`;
-
-  result.innerHTML = renderShipment(shipment) + ticketsHtml;
-}
-
-function customerTicketCard(t) {
-  const meta = CUSTOMER_STATUS[t.status] || CUSTOMER_STATUS.pending;
-
-  const message = t.customerVisibleNote
-    ? `<div class="message">${t.customerVisibleNote}</div>`
-    : `<div class="message muted">客服正在核实，有结果后会在这里回复您。</div>`;
-
-  // 只展示标记为"客户可见"的历史，内部记录不会出现在这里
-  const history = t.history
-    .filter((h) => h.visible)
-    .map((h) => `<li>${h.text}<time>${fmtTime(h.time)}</time></li>`)
-    .join("");
-
-  const actions =
-    t.status === "resolved"
-      ? `<div class="actions">
-           <button class="btn primary" data-confirm="${t.id}">确认已解决</button>
-           <button class="btn" data-reject="${t.id}">不认可</button>
-         </div>`
-      : "";
-
-  return `
-    <div class="card">
-      <div class="card-head">
-        <div>
-          <div class="code">${t.id}</div>
-          <div class="empty">${t.type} · 提交于 ${fmtTime(t.createdAt)}</div>
-        </div>
-        <span class="badge ${meta.badge}">${meta.label}</span>
-      </div>
-      ${message}
-      <ul class="timeline">${history}</ul>
-      ${actions}
-    </div>
-  `;
-}
-
-// 客户确认或拒绝，都要走状态机
-result.addEventListener("click", (event) => {
-  const confirmBtn = event.target.closest("[data-confirm]");
-  if (confirmBtn) {
-    resolveTicket(confirmBtn.dataset.confirm, true);
-    return;
-  }
-
-  const rejectBtn = event.target.closest("[data-reject]");
-  if (rejectBtn) {
-    resolveTicket(rejectBtn.dataset.reject, false);
-  }
-});
-
-function resolveTicket(id, accepted) {
-  const ticket = tickets.find((t) => t.id === id);
-  if (!ticket) return;
-
-  const target = accepted ? "closed" : "processing";
-  if (!canTransition(ticket.status, target)) {
-    console.warn(`非法流转：${ticket.status} → ${target}`);
-    return;
-  }
-
-  if (accepted) {
-    ticket.status = "closed";
-    addHistory(ticket, "客户确认问题已解决，工单关闭", true);
-  } else {
-    ticket.status = "processing";
-    ticket.customerVisibleNote = "";   // 旧说明作废，客服要重新写
-    addHistory(ticket, "客户不认可处理结果，工单退回重新处理", true);
-  }
-
-  saveTickets();
-
-  const currentId = input.value.trim().toUpperCase();
-  if (shipments[currentId]) renderCustomerResult(currentId);
-
-  renderTickets();
-  renderOps();
-}
-
-// ================================================================
-//  工单模块（M2）
-// ================================================================
-
-// ---------- 状态机 ----------
-// 每个状态只能流转到数组里列出的状态，不在列表里的流转一律拒绝。
-// 这是整个系统的"规则核心"：客户不认可 → 从 resolved 退回 processing。
-const TRANSITIONS = {
-  pending: ["processing"],              // 待分派 → 指派后进入处理中
-  processing: ["resolved"],             // 处理中 → 运营提交结果
-  resolved: ["closed", "processing"],   // 待确认 → 客户确认关闭 / 客户不认可退回
-  closed: [],                           // 已关闭是终态
-};
+const SLA_HOURS = 24;        // 处理时限：24 小时
+const NEAR_DUE_HOURS = 4;    // 剩余不足 4 小时算"即将超时"
 
 const STATUS_META = {
   pending: { label: "待分派", badge: "warn" },
@@ -234,84 +13,43 @@ const STATUS_META = {
   closed: { label: "已关闭", badge: "muted" },
 };
 
-const SLA_HOURS = 24;        // 处理时限：24 小时
-const NEAR_DUE_HOURS = 4;    // 剩余不足 4 小时算"即将超时"
-
-// 用"几小时前"生成时间，保证演示时总有超时/临期的工单
-const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000);
-
-let tickets = [
-  { id: "GD-0001", trackingId: "SF1001", type: "延误", status: "pending", assignee: "", createdAt: hoursAgo(30), note: "包裹三天没有更新", internalNotes: "", result: "", customerVisibleNote: "" },
-  { id: "GD-0002", trackingId: "SF1002", type: "物品破损", status: "processing", assignee: "王运营", createdAt: hoursAgo(20), note: "外包装破损，客户拒收", internalNotes: "已联系武汉站点确认外箱破损，正在重新打包", result: "", customerVisibleNote: "" },
-  { id: "GD-0003", trackingId: "SF1002", type: "标签破损", status: "processing", assignee: "李运营", createdAt: hoursAgo(2), note: "面单模糊，地址无法辨认", internalNotes: "", result: "", customerVisibleNote: "" },
-  { id: "GD-0004", trackingId: "SF1003", type: "签收争议", status: "resolved", assignee: "王运营", createdAt: hoursAgo(10), note: "显示已签收但客户称未收到", internalNotes: "监控显示快件被同楼住户代收", result: "已上门取回并重新派送", customerVisibleNote: "您反馈的签收问题我们已核实：快件由同楼住户代收，我们已取回并重新安排派送，预计今天送达。" },
-  { id: "GD-0005", trackingId: "SF1001", type: "联系人异常", status: "closed", assignee: "李运营", createdAt: hoursAgo(50), note: "收件电话为空号", internalNotes: "三次拨打均提示空号", result: "已按寄件人地址退回", customerVisibleNote: "因收件电话无法接通，包裹已退回寄件人" },
-];
-
-// 给每条工单补上历史记录字段（旧数据可能没有）
-// 演示用的客户可见历史，让客户页面一打开就有内容
-const seedHistory = {
-  "GD-0004": [
-    { time: hoursAgo(9), text: "客户提交了异常反馈", visible: true },
-    { time: hoursAgo(3), text: "客服已回复处理说明", visible: true },
-  ],
-  "GD-0005": [
-    { time: hoursAgo(49), text: "客户提交了异常反馈", visible: true },
-    { time: hoursAgo(20), text: "客服已回复处理说明", visible: true },
-    { time: hoursAgo(18), text: "客户确认问题已解决，工单关闭", visible: true },
-  ],
+// 同一个状态，客户看到的说法不一样
+const CUSTOMER_STATUS = {
+  pending: { label: "已受理，等待处理", badge: "warn" },
+  processing: { label: "处理中", badge: "info" },
+  resolved: { label: "待您确认", badge: "ok" },
+  closed: { label: "已解决", badge: "muted" },
 };
-tickets.forEach((t) => { t.history = seedHistory[t.id] || []; });
 
-// ============ 本地持久化（M4） ============
-// 浏览器 localStorage 只能存字符串，所以 Date 要转成 ISO 字符串再存回来转回 Date
-const STORAGE_KEY = "express-exception:tickets:v1";
-
-function saveTickets() {
-  const plain = tickets.map((t) => ({
-    ...t,
-    createdAt: t.createdAt.toISOString(),
-  }));
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(plain));
-  } catch (err) {
-    console.warn("保存到本地失败（可能是浏览器限制了本地存储）", err);
-  }
-}
-
-function loadTickets() {
-  let raw;
-  try {
-    raw = localStorage.getItem(STORAGE_KEY);
-  } catch (err) {
-    return null;      // 某些环境下不允许访问 localStorage，直接用默认数据
-  }
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw).map((t) => ({ ...t, createdAt: new Date(t.createdAt) }));
-  } catch (err) {
-    console.warn("本地数据损坏，已忽略", err);
-    return null;
-  }
-}
-
-const savedTickets = loadTickets();
-if (savedTickets && savedTickets.length > 0) {
-  tickets = savedTickets;
-}
-
-// 记录一条历史，visible 决定客户能不能看到
-function addHistory(ticket, text, visible) {
-  ticket.history.push({ time: new Date().toISOString(), text, visible });
-}
-
-let ticketSeq =
-  tickets.reduce((max, t) => Math.max(max, Number(t.id.replace("GD-", "")) || 0), 0) + 1;
+// ==================== 全局状态 ====================
+let tickets = [];              // 从后端拿到的工单列表
 let currentFilter = "all";
+let currentOpsUser = "王运营";
+let editingTicketId = null;
+let lastQueryId = "";          // 记住客户上次查的运单号，操作后自动刷新
 
-const ticketBody = document.getElementById("ticket-body");
+// ==================== 请求封装 ====================
+// 统一处理：解析 JSON、非 2xx 抛错（错误信息用后端返回的 error 字段）
+async function request(path, options = {}) {
+  const res = await fetch(path, options);
+  const contentType = res.headers.get("content-type") || "";
+  const data = contentType.includes("application/json") ? await res.json() : null;
 
-// ---------- 时限计算 ----------
+  if (!res.ok) {
+    throw new Error((data && data.error) || `请求失败（${res.status}）`);
+  }
+  return data;
+}
+
+function postJson(path, body, headers = {}) {
+  return request(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+// ==================== 工具函数 ====================
 function formatDuration(ms) {
   const totalMinutes = Math.floor(ms / 60000);
   const h = Math.floor(totalMinutes / 60);
@@ -323,7 +61,8 @@ function slaOf(ticket) {
   if (ticket.status === "closed") return { text: "—", badge: "muted" };
   if (ticket.status === "resolved") return { text: "等待客户确认", badge: "ok" };
 
-  const deadline = ticket.createdAt.getTime() + SLA_HOURS * 3600 * 1000;
+  const createdAt = new Date(ticket.createdAt);
+  const deadline = createdAt.getTime() + SLA_HOURS * 3600 * 1000;
   const left = deadline - Date.now();
 
   if (left < 0) return { text: `已超时 ${formatDuration(-left)}`, badge: "danger" };
@@ -331,16 +70,39 @@ function slaOf(ticket) {
   return { text: `剩余 ${formatDuration(left)}`, badge: "muted" };
 }
 
-// ---------- 状态机判定 ----------
-function canTransition(from, to) {
-  return (TRANSITIONS[from] || []).includes(to);
+function fmtTime(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// ---------- 渲染 ----------
+// ==================== 数据加载 ====================
+async function loadTickets() {
+  tickets = await request("/api/tickets");
+  renderTickets();
+  renderOps();
+}
+
+// ==================== 视图切换 ====================
+document.querySelectorAll(".tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("view-" + btn.dataset.view).classList.add("active");
+
+    if (btn.dataset.view === "service") renderTickets();
+    if (btn.dataset.view === "ops") renderOps();
+  });
+});
+
+// ================================================================
+//  客服：工单列表
+// ================================================================
+const ticketBody = document.getElementById("ticket-body");
+
 function renderTickets() {
-  const list = tickets.filter(
-    (t) => currentFilter === "all" || t.status === currentFilter
-  );
+  const list = tickets.filter((t) => currentFilter === "all" || t.status === currentFilter);
 
   if (list.length === 0) {
     ticketBody.innerHTML = `<tr><td colspan="8" class="empty">当前筛选下没有工单</td></tr>`;
@@ -385,64 +147,61 @@ function updateStats() {
 
   const overdue = tickets.filter((t) => {
     if (t.status === "closed" || t.status === "resolved") return false;
-    return t.createdAt.getTime() + SLA_HOURS * 3600 * 1000 < Date.now();
+    const deadline = new Date(t.createdAt).getTime() + SLA_HOURS * 3600 * 1000;
+    return deadline < Date.now();
   }).length;
 
   document.getElementById("stat-overdue").textContent = overdue;
 }
 
-// ---------- 交互：指派 / 对外说明 ----------
+// ---------- 指派 ----------
 ticketBody.addEventListener("click", (event) => {
   const assignBtn = event.target.closest("[data-assign]");
   if (assignBtn) {
     assignTicket(assignBtn.dataset.assign);
     return;
   }
-
   const explainBtn = event.target.closest("[data-explain]");
   if (explainBtn) {
     writeCustomerNote(explainBtn.dataset.explain);
   }
 });
 
-function assignTicket(id) {
-  const ticket = tickets.find((t) => t.id === id);
-  if (!ticket) return;
-
-  // 状态机校验：只有 pending 才能流转到 processing
-  if (!canTransition(ticket.status, "processing")) {
-    console.warn(`非法流转：${ticket.status} → processing`);
-    return;
-  }
-
-  // 让客服自己选处理人；点"取消"就什么都不做
+async function assignTicket(id) {
   const name = prompt("把这个工单指派给谁？", "王运营");
-  if (name === null) return;                   // 用户点了取消
-  ticket.assignee = name.trim() || "王运营";    // 输入为空时回退到默认值
+  if (name === null) return;
+  const assignee = name.trim() || "王运营";
 
-  ticket.status = "processing";
-  addHistory(ticket, `客服已创建工单并分派给 ${ticket.assignee}`, false);
-  saveTickets();
-  renderTickets();
+  try {
+    await postJson(`/api/tickets/${id}/assign`, { assignee });
+    await loadTickets();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
-// 客服把运营的内部结论整理成"客户能看懂"的说明
-function writeCustomerNote(id) {
+async function writeCustomerNote(id) {
   const ticket = tickets.find((t) => t.id === id);
   if (!ticket) return;
 
   const hint = ticket.customerVisibleNote || "我们已核实您反馈的情况，正在处理，稍后会同步结果。";
   const text = prompt("写给客户看的说明（内部记录不会出现在这里）：", hint);
-  if (text === null) return;              // 取消
-  ticket.customerVisibleNote = text.trim();
-  addHistory(ticket, "客服已回复处理说明", true);
-  saveTickets();
+  if (text === null) return;
+  if (!text.trim()) {
+    alert("说明不能为空");
+    return;
+  }
 
-  renderTickets();
-  renderOps();
+  try {
+    await postJson(`/api/tickets/${id}/explain`, { text: text.trim() });
+    await loadTickets();
+    if (lastQueryId) await queryShipment(lastQueryId);
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
-// ---------- 交互：筛选 ----------
+// ---------- 筛选 ----------
 document.getElementById("ticket-filters").addEventListener("click", (event) => {
   const chip = event.target.closest("[data-status]");
   if (!chip) return;
@@ -453,7 +212,7 @@ document.getElementById("ticket-filters").addEventListener("click", (event) => {
   renderTickets();
 });
 
-// ---------- 交互：新建工单 ----------
+// ---------- 新建工单 ----------
 const createForm = document.getElementById("create-form");
 
 document.getElementById("create-ticket-btn").addEventListener("click", () => {
@@ -465,47 +224,35 @@ document.getElementById("cancel-create").addEventListener("click", () => {
   createForm.classList.add("hidden");
 });
 
-document.getElementById("ticket-form").addEventListener("submit", (event) => {
+document.getElementById("ticket-form").addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const trackingId = document.getElementById("f-tracking").value.trim().toUpperCase();
+  const type = document.getElementById("f-type").value;
+  const note = document.getElementById("f-desc").value.trim();
   if (!trackingId) return;
 
-  tickets.unshift({
-    id: "GD-" + String(ticketSeq++).padStart(4, "0"),
-    trackingId,
-    type: document.getElementById("f-type").value,
-    status: "pending",
-    assignee: "",
-    createdAt: new Date(),
-    note: document.getElementById("f-desc").value.trim(),
-    internalNotes: "",
-    result: "",
-    customerVisibleNote: "",
-    history: [{ time: new Date().toISOString(), text: "客户提交了异常反馈", visible: true }],
-  });
-  saveTickets();
-
-  event.target.reset();
-  createForm.classList.add("hidden");
-  currentFilter = "all";
-  document.querySelectorAll("#ticket-filters .chip").forEach((c) =>
-    c.classList.toggle("active", c.dataset.status === "all")
-  );
-  renderTickets();
+  try {
+    await postJson("/api/tickets", { trackingId, type, note });
+    event.target.reset();
+    createForm.classList.add("hidden");
+    currentFilter = "all";
+    document.querySelectorAll("#ticket-filters .chip").forEach((c) =>
+      c.classList.toggle("active", c.dataset.status === "all")
+    );
+    await loadTickets();
+    if (lastQueryId === trackingId) await queryShipment(trackingId);
+  } catch (err) {
+    alert(err.message);
+  }
 });
 
 // ================================================================
-//  运营处理模块（M3）
+//  运营：处理工单
 // ================================================================
-
-let currentOpsUser = "王运营";
-let editingTicketId = null;
-
 const opsList = document.getElementById("ops-list");
 const opsPanel = document.getElementById("ops-panel");
 
-// 只渲染"指派给我"的工单：这就是最小权限原则
 function renderOps() {
   const processing = tickets.filter(
     (t) => t.assignee === currentOpsUser && t.status === "processing"
@@ -546,17 +293,13 @@ function opsCard(t, actionable) {
   `;
 }
 
-// 打开处理面板（先校验身份和状态，再展示表单）
 function openOpsPanel(id) {
   const t = tickets.find((x) => x.id === id);
   if (!t) return;
 
+  // 前端这层只是体验；真正的拦截在后端
   if (t.assignee !== currentOpsUser) {
-    alert("这张工单没有指派给你，你不能处理。");
-    return;
-  }
-  if (!canTransition(t.status, "resolved")) {
-    alert("当前状态不允许提交处理结果。");
+    alert("这张工单没有指派给你。");
     return;
   }
 
@@ -583,45 +326,165 @@ opsList.addEventListener("click", (event) => {
 
 document.getElementById("ops-cancel").addEventListener("click", closeOpsPanel);
 
-// 提交处理结果：状态机 + 身份 双重校验
-document.getElementById("ops-form").addEventListener("submit", (event) => {
+document.getElementById("ops-form").addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const t = tickets.find((x) => x.id === editingTicketId);
   if (!t) return;
 
-  if (t.assignee !== currentOpsUser) {
-    alert("只有被分派的人可以提交处理结果。");
-    return;
-  }
-  if (!canTransition(t.status, "resolved")) {
-    alert("当前状态不允许提交处理结果。");
-    return;
-  }
+  try {
+    // 身份放在请求体里，后端会校验它是否等于 assignee
+    await postJson(`/api/tickets/${t.id}/result`, {
+      internalNotes: document.getElementById("ops-notes").value.trim(),
+      result: document.getElementById("ops-result").value.trim(),
+      operator: currentOpsUser,
+    });
 
-  t.internalNotes = document.getElementById("ops-notes").value.trim();
-  t.result = document.getElementById("ops-result").value.trim();
-  t.status = "resolved";          // 处理中 → 待客户确认
-  addHistory(t, `运营已提交处理结果：${t.result || "（未填写）"}`, false);
-  saveTickets();
-
-  closeOpsPanel();
-  renderOps();
-  renderTickets();
+    closeOpsPanel();
+    await loadTickets();
+    if (lastQueryId === t.trackingId) await queryShipment(lastQueryId);
+  } catch (err) {
+    alert(err.message);   // 403 时这里会显示后端返回的原文
+  }
 });
 
-// 切换身份：重新渲染，列表跟着变
 document.getElementById("ops-user").addEventListener("change", (event) => {
   currentOpsUser = event.target.value;
   closeOpsPanel();
   renderOps();
 });
 
-// ---------- 初始化 ----------
-renderTickets();
-renderOps();
+// ================================================================
+//  客户：查件 + 工单进度
+// ================================================================
+const form = document.getElementById("query-form");
+const input = document.getElementById("tracking-input");
+const result = document.getElementById("result");
 
-// 每分钟重算一次时限，让"剩余时间"真的在走
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const id = input.value.trim().toUpperCase();
+  if (!id) return;
+  queryShipment(id);
+});
+
+async function queryShipment(trackingId) {
+  lastQueryId = trackingId;
+  result.innerHTML = `<p class="empty">正在查询…</p>`;
+
+  try {
+    const [shipment, list] = await Promise.all([
+      request(`/api/shipments/${encodeURIComponent(trackingId)}`),
+      request(`/api/tickets?trackingId=${encodeURIComponent(trackingId)}`),
+    ]);
+
+    const ticketsHtml = list.length
+      ? `<h2 class="section-title">我的工单</h2>` + list.map(customerTicketCard).join("")
+      : `<p class="empty">这件包裹目前没有异常工单。</p>`;
+
+    result.innerHTML = renderShipment(shipment) + ticketsHtml;
+  } catch (err) {
+    result.innerHTML = `<p class="empty">${err.message}</p>`;
+  }
+}
+
+function renderShipment(s) {
+  const badge = s.exception
+    ? '<span class="badge warn">存在异常</span>'
+    : '<span class="badge ok">运输正常</span>';
+
+  const notice = s.exception ? `<div class="notice">${s.exception}</div>` : "";
+
+  const traces = s.traces
+    .map((t) => `<li>${t.text}<time>${t.time}</time></li>`)
+    .join("");
+
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="code">${s.id}</div>
+          <div class="empty">${s.from} → ${s.to}</div>
+        </div>
+        ${badge}
+      </div>
+      <div class="meta">
+        <div>当前状态<b>${s.status}</b></div>
+        <div>最近更新<b>${s.updated}</b></div>
+      </div>
+      ${notice}
+      <ul class="timeline">${traces}</ul>
+    </div>
+  `;
+}
+
+function customerTicketCard(t) {
+  const meta = CUSTOMER_STATUS[t.status] || CUSTOMER_STATUS.pending;
+
+  const message = t.customerVisibleNote
+    ? `<div class="message">${t.customerVisibleNote}</div>`
+    : `<div class="message muted">客服正在核实，有结果后会在这里回复您。</div>`;
+
+  const history = t.history
+    .filter((h) => h.visible)
+    .map((h) => `<li>${h.text}<time>${fmtTime(h.time)}</time></li>`)
+    .join("");
+
+  const actions =
+    t.status === "resolved"
+      ? `<div class="actions">
+           <button class="btn primary" data-confirm="${t.id}">确认已解决</button>
+           <button class="btn" data-reject="${t.id}">不认可</button>
+         </div>`
+      : "";
+
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="code">${t.id}</div>
+          <div class="empty">${t.type} · 提交于 ${fmtTime(t.createdAt)}</div>
+        </div>
+        <span class="badge ${meta.badge}">${meta.label}</span>
+      </div>
+      ${message}
+      <ul class="timeline">${history}</ul>
+      ${actions}
+    </div>
+  `;
+}
+
+result.addEventListener("click", (event) => {
+  const confirmBtn = event.target.closest("[data-confirm]");
+  if (confirmBtn) {
+    resolveTicket(confirmBtn.dataset.confirm, true);
+    return;
+  }
+  const rejectBtn = event.target.closest("[data-reject]");
+  if (rejectBtn) {
+    resolveTicket(rejectBtn.dataset.reject, false);
+  }
+});
+
+async function resolveTicket(id, accepted) {
+  try {
+    await postJson(`/api/tickets/${id}/${accepted ? "confirm" : "reject"}`);
+    await loadTickets();
+    if (lastQueryId) await queryShipment(lastQueryId);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// ================================================================
+//  启动
+// ================================================================
+loadTickets().catch((err) => {
+  ticketBody.innerHTML = `<tr><td colspan="8" class="empty">加载失败：${err.message}</td></tr>`;
+  opsList.innerHTML = `<p class="empty">加载失败：${err.message}</p>`;
+});
+
+// 每分钟重算一次时限显示（不重新请求数据）
 setInterval(() => {
   renderTickets();
   renderOps();
