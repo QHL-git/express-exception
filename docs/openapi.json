@@ -1,0 +1,327 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "快递异常件处理系统 API",
+    "version": "1.0.0",
+    "description": "客户提交异常 → 客服建单分派 → 运营核实处理 → 客服对外说明 → 客户确认闭环。\n\n演示账号（密码均为 123456）：customer / agent / wang。\n\n调用顺序：先调 POST /api/auth/login 拿到 token，再在请求头带 Authorization: Bearer <token>。"
+  },
+  "servers": [
+    { "url": "http://localhost:3000", "description": "本地开发" }
+  ],
+  "tags": [
+    { "name": "认证", "description": "登录与当前用户" },
+    { "name": "运单", "description": "运单查询" },
+    { "name": "工单", "description": "工单查询与状态流转" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "example": "agent" },
+          "password": { "type": "string", "example": "123456" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string", "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "example": "u-agent" },
+              "username": { "type": "string", "example": "agent" },
+              "name": { "type": "string", "example": "客服小李" },
+              "role": { "type": "string", "enum": ["customer", "agent", "ops"] }
+            }
+          }
+        }
+      },
+      "Ticket": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "GD-0001" },
+          "trackingId": { "type": "string", "example": "SF1001" },
+          "customerId": { "type": "string", "example": "u-cust" },
+          "type": { "type": "string", "example": "延误" },
+          "status": { "type": "string", "enum": ["pending", "processing", "resolved", "closed"] },
+          "assignee": { "type": "string", "example": "王运营" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "note": { "type": "string", "example": "包裹三天没有更新" },
+          "internalNotes": { "type": "string", "description": "内部核实记录，客户不可见" },
+          "result": { "type": "string", "description": "内部处理结果，客户不可见" },
+          "customerVisibleNote": { "type": "string", "description": "对外说明，客户可见" },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time": { "type": "string" },
+                "text": { "type": "string" },
+                "visible": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "CreateTicketRequest": {
+        "type": "object",
+        "required": ["trackingId", "type"],
+        "properties": {
+          "trackingId": { "type": "string", "example": "SF1002" },
+          "type": { "type": "string", "enum": ["延误", "物品破损", "标签破损", "联系人异常", "签收争议"] },
+          "note": { "type": "string", "maxLength": 200, "example": "外包装破损，客户拒收" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "未登录或登录已过期" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["认证"],
+        "summary": "健康检查",
+        "security": [],
+        "responses": {
+          "200": { "description": "服务正常", "content": { "application/json": { "example": { "ok": true, "time": "2026-10-29T00:00:00.000Z" } } } }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "登录",
+        "description": "返回 JWT，后续请求放在 Authorization: Bearer <token>",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } }
+          },
+          "401": { "description": "账号或密码错误", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["认证"],
+        "summary": "当前用户",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "成功" },
+          "401": { "description": "未登录" }
+        }
+      }
+    },
+    "/api/shipments/{id}": {
+      "get": {
+        "tags": ["运单"],
+        "summary": "查询运单",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "SF1001" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "example": {
+                  "id": "SF1001",
+                  "status": "运输中",
+                  "from": "杭州",
+                  "to": "武汉",
+                  "updated": "2026-10-26 09:12",
+                  "exception": "物流信息已连续 3 天未更新（延误）",
+                  "traces": [{ "text": "包裹已到达武汉转运中心", "time": "10-23 08:20" }]
+                }
+              }
+            }
+          },
+          "404": { "description": "运单不存在" }
+        }
+      }
+    },
+    "/api/tickets": {
+      "get": {
+        "tags": ["工单"],
+        "summary": "工单列表",
+        "description": "客户只能看到自己的工单；运营只能看到指派给自己的工单；客服可看全部",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "processing", "resolved", "closed"] } },
+          { "name": "trackingId", "in": "query", "schema": { "type": "string" }, "example": "SF1001" }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Ticket" } }
+              }
+            }
+          },
+          "401": { "description": "未登录" }
+        }
+      },
+      "post": {
+        "tags": ["工单"],
+        "summary": "创建工单（客户提交异常反馈）",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateTicketRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "创建成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ticket" } } } },
+          "400": { "description": "参数错误（运单不存在 / 类型不合法 / 描述超长）" },
+          "403": { "description": "角色无权限" }
+        }
+      }
+    },
+    "/api/tickets/{id}": {
+      "get": {
+        "tags": ["工单"],
+        "summary": "工单详情",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "GD-0001" }
+        ],
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ticket" } } } },
+          "403": { "description": "无权查看该工单" },
+          "404": { "description": "工单不存在" }
+        }
+      }
+    },
+    "/api/tickets/{id}/assign": {
+      "post": {
+        "tags": ["工单"],
+        "summary": "指派处理人（客服）",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "GD-0001" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["assignee"],
+                "properties": { "assignee": { "type": "string", "example": "王运营" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "指派成功（状态变为 processing）" },
+          "403": { "description": "非客服角色" },
+          "409": { "description": "当前状态不允许指派" }
+        }
+      }
+    },
+    "/api/tickets/{id}/result": {
+      "post": {
+        "tags": ["工单"],
+        "summary": "提交处理结果（运营，须为被分派人）",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "GD-0002" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "internalNotes": { "type": "string", "example": "已联系武汉站点确认外箱破损" },
+                  "result": { "type": "string", "example": "已重新打包，安排次日派送" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "提交成功（状态变为 resolved）" },
+          "403": { "description": "不是被分派的运营人员" },
+          "409": { "description": "当前状态不允许提交" }
+        }
+      }
+    },
+    "/api/tickets/{id}/explain": {
+      "post": {
+        "tags": ["工单"],
+        "summary": "生成对外说明（客服）",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "GD-0002" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text"],
+                "properties": { "text": { "type": "string", "example": "已重新打包并安排派送，预计明天送达。" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "已保存对外说明" },
+          "403": { "description": "非客服角色" }
+        }
+      }
+    },
+    "/api/tickets/{id}/confirm": {
+      "post": {
+        "tags": ["工单"],
+        "summary": "客户确认解决",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "GD-0004" }
+        ],
+        "responses": {
+          "200": { "description": "工单关闭（closed）" },
+          "403": { "description": "不是该工单的客户" },
+          "409": { "description": "当前状态不能关闭" }
+        }
+      }
+    },
+    "/api/tickets/{id}/reject": {
+      "post": {
+        "tags": ["工单"],
+        "summary": "客户不认可，退回重办",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "GD-0004" }
+        ],
+        "responses": {
+          "200": { "description": "退回处理中（processing），对外说明清空" },
+          "403": { "description": "不是该工单的客户" },
+          "409": { "description": "当前状态不能退回" }
+        }
+      }
+    }
+  }
+}
