@@ -25,6 +25,9 @@ function canTransition(from, to) {
   return (TRANSITIONS[from] || []).includes(to);
 }
 
+// 异常类型白名单：后端也要校验，不能只信前端下拉框
+const EXCEPTION_TYPES = ["延误", "物品破损", "标签破损", "联系人异常", "签收争议"];
+
 // ==================== 数据库小工具 ====================
 function toTicket(row) {
   return {
@@ -113,8 +116,11 @@ app.post("/api/tickets", (req, res) => {
   const type = String(req.body.type || "").trim();
   const note = String(req.body.note || "").trim();
 
+  // 服务端校验：前端可以绕过，这里不能
   if (!trackingId) return res.status(400).json({ error: "缺少运单号" });
-  if (!type) return res.status(400).json({ error: "缺少异常类型" });
+  if (!shipments[trackingId]) return res.status(400).json({ error: "运单不存在，请核对单号" });
+  if (!EXCEPTION_TYPES.includes(type)) return res.status(400).json({ error: "异常类型不合法" });
+  if (note.length > 200) return res.status(400).json({ error: "问题描述不能超过 200 字" });
 
   const id = nextTicketId();
   db.prepare(`
@@ -219,6 +225,10 @@ app.post("/api/tickets/:id/reject", (req, res) => {
 
 // 统一错误处理
 app.use((err, req, res, next) => {
+  // 请求体不是合法 JSON：这是客户端的错，返回 400 而不是 500
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "请求体不是合法的 JSON" });
+  }
   console.error(err);
   res.status(500).json({ error: "服务器内部错误" });
 });

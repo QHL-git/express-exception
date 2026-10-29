@@ -26,6 +26,28 @@
       </form>
       <p class="hint">可以试试：SF1001（延误）、SF1002（破损）、SF1003（正常）</p>
       <div id="result"></div>
+
+      <div id="feedback-panel" class="card hidden">
+        <h2>反馈异常 · <span id="fb-tracking"></span></h2>
+        <form id="feedback-form">
+          <label>异常类型
+            <select id="fb-type">
+              <option>延误</option>
+              <option>物品破损</option>
+              <option>标签破损</option>
+              <option>联系人异常</option>
+              <option>签收争议</option>
+            </select>
+          </label>
+          <label>问题描述
+            <textarea id="fb-desc" rows="3" maxlength="200" placeholder="说说这个包裹出了什么问题（最多 200 字）"></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit" id="fb-submit" class="btn primary">提交反馈</button>
+            <button type="button" id="fb-cancel" class="btn">取消</button>
+          </div>
+        </form>
+      </div>
     </section>
 
     <!-- 客服视角 -->

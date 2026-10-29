@@ -332,6 +332,8 @@ document.getElementById("ops-form").addEventListener("submit", async (event) => 
   const t = tickets.find((x) => x.id === editingTicketId);
   if (!t) return;
 
+  const restore = setBusy(event.submitter || document.querySelector("#ops-form button[type=submit]"), "提交中…");
+
   try {
     // 身份放在请求体里，后端会校验它是否等于 assignee
     await postJson(`/api/tickets/${t.id}/result`, {
@@ -345,6 +347,8 @@ document.getElementById("ops-form").addEventListener("submit", async (event) => 
     if (lastQueryId === t.trackingId) await queryShipment(lastQueryId);
   } catch (err) {
     alert(err.message);   // 403 时这里会显示后端返回的原文
+  } finally {
+    restore();
   }
 });
 
@@ -382,7 +386,12 @@ async function queryShipment(trackingId) {
       ? `<h2 class="section-title">我的工单</h2>` + list.map(customerTicketCard).join("")
       : `<p class="empty">这件包裹目前没有异常工单。</p>`;
 
-    result.innerHTML = renderShipment(shipment) + ticketsHtml;
+    const toolbar = `
+      <div class="actions" style="margin: 8px 0 4px">
+        <button class="btn" data-feedback="${trackingId}">这个包裹有问题，去反馈</button>
+      </div>`;
+
+    result.innerHTML = renderShipment(shipment) + toolbar + ticketsHtml;
   } catch (err) {
     result.innerHTML = `<p class="empty">${err.message}</p>`;
   }
@@ -455,6 +464,12 @@ function customerTicketCard(t) {
 }
 
 result.addEventListener("click", (event) => {
+  const feedbackBtn = event.target.closest("[data-feedback]");
+  if (feedbackBtn) {
+    openFeedback(feedbackBtn.dataset.feedback);
+    return;
+  }
+
   const confirmBtn = event.target.closest("[data-confirm]");
   if (confirmBtn) {
     resolveTicket(confirmBtn.dataset.confirm, true);
@@ -475,6 +490,59 @@ async function resolveTicket(id, accepted) {
     alert(err.message);
   }
 }
+
+// ================================================================
+//  客户：提交异常反馈
+// ================================================================
+const feedbackPanel = document.getElementById("feedback-panel");
+let feedbackTrackingId = "";
+
+// 请求期间禁用按钮，避免用户连点提交出两条工单
+function setBusy(button, text) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = text;
+  return () => {
+    button.disabled = false;
+    button.textContent = original;
+  };
+}
+
+function openFeedback(trackingId) {
+  feedbackTrackingId = trackingId;
+  document.getElementById("fb-tracking").textContent = trackingId;
+  feedbackPanel.classList.remove("hidden");
+  feedbackPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.getElementById("fb-cancel").addEventListener("click", () => {
+  feedbackPanel.classList.add("hidden");
+});
+
+document.getElementById("feedback-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const button = document.getElementById("fb-submit");
+  const restore = setBusy(button, "提交中…");
+
+  try {
+    await postJson("/api/tickets", {
+      trackingId: feedbackTrackingId,
+      type: document.getElementById("fb-type").value,
+      note: document.getElementById("fb-desc").value.trim(),
+    });
+
+    event.target.reset();
+    feedbackPanel.classList.add("hidden");
+
+    await loadTickets();
+    await queryShipment(feedbackTrackingId);
+  } catch (err) {
+    alert(err.message);      // 例如"运单不存在，请核对单号"
+  } finally {
+    restore();
+  }
+});
 
 // ================================================================
 //  启动
